@@ -712,5 +712,5 @@ app.add_custom_css()
 server = app.app.server 
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 8050))
+    port = int(os.environ.get("PORT", 8000))  
     app.run_server(host='0.0.0.0', port=port)
