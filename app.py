@@ -345,6 +345,15 @@ class DelayedMaidsAnalytics:
                             export_format="csv"
                         )
                     ])
+                ]),
+                # Footer
+                html.Footer([
+                    html.Hr(className="my-4"),
+                    html.P(
+                        "© 2024 Developed by Chekri Khalife @Maids.cc. All rights reserved.",
+                        className="text-center text-muted",
+                        style={'fontSize': '0.9rem'}
+                    )
                 ])
             ])
         ])
