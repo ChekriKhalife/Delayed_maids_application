@@ -705,6 +705,10 @@ class DelayedMaidsAnalytics:
         self.app.run_server(debug=debug, port=port, host=host)
 
 
+app = DelayedMaidsAnalytics()
+app.create_layout()
+app.setup_callbacks()
+app.add_custom_css()
+
 if __name__ == '__main__':
-    app = DelayedMaidsAnalytics()
-    app.run_server(debug=True, port=8076)
+    app.run_server()
