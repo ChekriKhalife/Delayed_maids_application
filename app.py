@@ -9,7 +9,7 @@ import numpy as np
 import base64
 import io
 
-# Constants
+# Constants remain the same
 TASK_THRESHOLDS = {
     'Apply for Work Permit - Stage 1': 168,
     'Pay MOHRE Insurance': 24,
@@ -82,7 +82,6 @@ class DelayedMaidsAnalytics:
             df['Threshold (in hours)'] = df['Current Stage'].map(TASK_THRESHOLDS).fillna(24)
             df['Delay (hours)'] = (df['Time in Stage'] - df['Threshold (in hours)']).fillna(0)
             
-            # Calculate severity based on how much they've exceeded their threshold
             df['Threshold Ratio'] = df['Time in Stage'] / df['Threshold (in hours)']
             df['Severity'] = pd.cut(
                 df['Threshold Ratio'],
@@ -90,10 +89,7 @@ class DelayedMaidsAnalytics:
                 labels=['Low', 'Medium', 'High', 'Critical']
             ).fillna('Low')
             
-            # Calculate priority score
             df['Priority Score'] = df.apply(self._calculate_priority, axis=1)
-            
-            # Calculate total delay per housemaid
             df['Total Delay (hours)'] = df.groupby('Housemaid ID')['Delay (hours)'].transform('sum')
             
             return df
@@ -127,65 +123,73 @@ class DelayedMaidsAnalytics:
             return 0
 
     def create_layout(self):
-        """Create enhanced layout focusing on priority analysis and detailed cases."""
+        """Create enhanced layout with improved design and filter controls."""
         self.app.layout = html.Div([
-            # Header
+            # Enhanced Header with Gradient Background
             dbc.Navbar(
                 dbc.Container([
-                    html.H2("Delayed Cases Analytics", className="text-white mb-0"),
-                    dcc.Upload(
-                        id='upload-data',
-                        children=dbc.Button(
-                            ["Upload Excel ", html.I(className="fas fa-upload")],
-                            color="light",
-                            className="me-2"
+                    html.Div([
+                        html.I(className="fas fa-chart-line me-2"),
+                        html.H2("Delayed Cases Analytics", className="text-white mb-0"),
+                    ], className="d-flex align-items-center"),
+                    html.Div([
+                        dcc.Upload(
+                            id='upload-data',
+                            children=dbc.Button(
+                                ["Upload Excel ", html.I(className="fas fa-upload ms-1")],
+                                color="light",
+                                className="me-2"
+                            ),
+                            multiple=False
                         ),
-                        multiple=False
-                    ),
-                    html.Span(id='last-update', className="text-white ms-2")
+                        html.Span(id='last-update', className="text-white ms-2 small")
+                    ], className="d-flex align-items-center")
                 ]),
                 color="primary",
                 dark=True,
-                className="mb-3"
+                className="mb-3 shadow-sm",
+                style={'background': 'linear-gradient(135deg, #1976d2 0%, #2196f3 100%)'}
             ),
 
             dbc.Container([
                 # Alert area
                 html.Div(id='alerts-area', className="mb-3"),
 
-                # Enhanced Filters
+                # Enhanced Filters Card
                 dbc.Card([
                     dbc.CardBody([
-                        html.H5("Filters", className="card-title mb-3"),
                         dbc.Row([
-                            dbc.Col(
+                            dbc.Col([
+                                html.H5([
+                                    html.I(className="fas fa-filter me-2"),
+                                    "Filters"
+                                ], className="card-title mb-3"),
+                            ], width=12),
+                            dbc.Col([
                                 dcc.Dropdown(
                                     id='stage-filter',
                                     placeholder="Filter by Stage",
                                     multi=True,
                                     className="mb-2"
-                                ),
-                                md=3
-                            ),
-                            dbc.Col(
+                                )
+                            ], md=3),
+                            dbc.Col([
                                 dcc.Dropdown(
                                     id='type-filter',
                                     placeholder="Filter by Type",
                                     multi=True,
                                     className="mb-2"
-                                ),
-                                md=3
-                            ),
-                            dbc.Col(
+                                )
+                            ], md=3),
+                            dbc.Col([
                                 dcc.Dropdown(
                                     id='nationality-filter',
                                     placeholder="Filter by Nationality",
                                     multi=True,
                                     className="mb-2"
-                                ),
-                                md=3
-                            ),
-                            dbc.Col(
+                                )
+                            ], md=3),
+                            dbc.Col([
                                 dcc.Dropdown(
                                     id='client-note-filter',
                                     options=[
@@ -197,57 +201,80 @@ class DelayedMaidsAnalytics:
                                     placeholder="Filter by Client Priority",
                                     multi=True,
                                     className="mb-2"
-                                ),
-                                md=3
-                            )
+                                )
+                            ], md=3)
                         ]),
-                        
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.ButtonGroup([
+                                    dbc.Button(
+                                        ["Apply Filters ", html.I(className="fas fa-check ms-1")],
+                                        id="apply-filters-btn",
+                                        color="primary",
+                                        className="me-2"
+                                    ),
+                                    dbc.Button(
+                                        ["Reset Filters ", html.I(className="fas fa-undo ms-1")],
+                                        id="reset-filters-btn",
+                                        color="secondary"
+                                    )
+                                ], className="mt-2")
+                            ], className="d-flex justify-content-end")
+                        ])
                     ])
-                ], className="mb-4 sticky-top bg-white", style={'zIndex': 1000}),
+                ], className="mb-4 shadow-sm"),
 
-                # Severity Legend
+                # Enhanced Severity Legend with Icons
                 dbc.Card([
                     dbc.CardBody([
-                        html.H6("Understanding Severity Levels:", className="mb-3"),
+                        html.H6([
+                            html.I(className="fas fa-info-circle me-2"),
+                            "Understanding Severity Levels"
+                        ], className="mb-3"),
                         dbc.Row([
                             dbc.Col([
                                 html.Div(className="d-flex align-items-center mb-2", children=[
-                                    html.Div(className="me-2", style={'width': '20px', 'height': '20px', 'backgroundColor': '#2196f3'}),
-                                    html.Span("Low: Up to 50% over threshold")
+                                    html.Div(className="me-2 rounded", style={'width': '20px', 'height': '20px', 'backgroundColor': '#2196f3'}),
+                                    html.Span(["Low: ", html.Small("Up to 50% over threshold", className="text-muted")])
                                 ]),
                                 html.Div(className="d-flex align-items-center mb-2", children=[
-                                    html.Div(className="me-2", style={'width': '20px', 'height': '20px', 'backgroundColor': '#fdd835'}),
-                                    html.Span("Medium: 50-100% over threshold")
+                                    html.Div(className="me-2 rounded", style={'width': '20px', 'height': '20px', 'backgroundColor': '#fdd835'}),
+                                    html.Span(["Medium: ", html.Small("50-100% over threshold", className="text-muted")])
                                 ])
                             ], md=6),
                             dbc.Col([
                                 html.Div(className="d-flex align-items-center mb-2", children=[
-                                    html.Div(className="me-2", style={'width': '20px', 'height': '20px', 'backgroundColor': '#f57c00'}),
-                                    html.Span("High: 100-200% over threshold")
+                                    html.Div(className="me-2 rounded", style={'width': '20px', 'height': '20px', 'backgroundColor': '#f57c00'}),
+                                    html.Span(["High: ", html.Small("100-200% over threshold", className="text-muted")])
                                 ]),
                                 html.Div(className="d-flex align-items-center mb-2", children=[
-                                    html.Div(className="me-2", style={'width': '20px', 'height': '20px', 'backgroundColor': '#d32f2f'}),
-                                    html.Span("Critical: Over 200% threshold")
+                                    html.Div(className="me-2 rounded", style={'width': '20px', 'height': '20px', 'backgroundColor': '#d32f2f'}),
+                                    html.Span(["Critical: ", html.Small("Over 200% threshold", className="text-muted")])
                                 ])
                             ], md=6)
                         ])
                     ])
-                ], className="mb-4"),
+                ], className="mb-4 shadow-sm"),
 
-                # KPI Cards
+                # KPI Cards Row
                 dbc.Row(id='kpi-cards', className="mb-4"),
 
-                # Client Priority Analysis
+                # Enhanced Charts Section
                 dbc.Row([
                     dbc.Col([
                         dbc.Card([
-                            dbc.CardHeader("Client Priority Analysis"),
+                            dbc.CardHeader([
+                                html.H5([
+                                    html.I(className="fas fa-chart-bar me-2"),
+                                    "Client Priority Analysis"
+                                ], className="mb-0")
+                            ]),
                             dbc.CardBody([
                                 dcc.Graph(id='client-priority-chart'),
                                 html.Hr(),
                                 dcc.Graph(id='priority-stage-chart')
                             ])
-                        ])
+                        ], className="shadow-sm")
                     ], width=12)
                 ], className="mb-4"),
 
@@ -255,12 +282,17 @@ class DelayedMaidsAnalytics:
                 dbc.Card([
                     dbc.CardHeader([
                         dbc.Row([
-                            dbc.Col(html.H5("Detailed Cases Overview"), md=3),
+                            dbc.Col([
+                                html.H5([
+                                    html.I(className="fas fa-table me-2"),
+                                    "Detailed Cases Overview"
+                                ])
+                            ], md=3),
                             dbc.Col([
                                 dbc.Input(
                                     id='table-search',
                                     type='text',
-                                    placeholder='Search cases...',
+                                    placeholder='🔍 Search cases...',
                                     className="mb-2"
                                 )
                             ], md=3),
@@ -295,24 +327,27 @@ class DelayedMaidsAnalytics:
                     ]),
                     dbc.CardBody([
                         dash_table.DataTable(
-                        id='detailed-table',
-                        filter_action="native",
-                        sort_action="native",
-                        sort_mode="multi",
-                        sort_by=[{'column_id': 'Time in Stage', 'direction': 'desc'}],  # Set default sorting
-                        page_action="native",
-                        page_current=0,
-                        page_size=25,
+                            id='detailed-table',
+                            filter_action="native",
+                            sort_action="native",
+                            sort_mode="multi",
+                            sort_by=[{'column_id': 'Time in Stage', 'direction': 'desc'}],
+                            page_action="native",
+                            page_current=0,
+                            page_size=25,
                             style_table={'overflowX': 'auto'},
                             style_header={
                                 'backgroundColor': '#f8f9fa',
                                 'fontWeight': 'bold',
-                                'textAlign': 'center'
+                                'textAlign': 'center',
+                                'padding': '12px',
+                                'border': '1px solid #dee2e6'
                             },
                             style_cell={
                                 'textAlign': 'left',
-                                'padding': '10px',
-                                'fontSize': '14px'
+                                'padding': '12px',
+                                'fontSize': '14px',
+                                'fontFamily': '"Segoe UI", system-ui, -apple-system'
                             },
                             style_data_conditional=[
                                 {
@@ -342,47 +377,74 @@ class DelayedMaidsAnalytics:
                                     'color': '#ef6c00'
                                 }
                             ],
-                            export_format="csv"
+                            export_format="csv",
+                            export_headers="display",
+                            merge_duplicate_headers=True
                         )
                     ])
-                ]),
-                # Footer
+                ], className="shadow-sm"),
+
+                # Enhanced Footer
                 html.Footer([
                     html.Hr(className="my-4"),
-                    html.P(
-                        "© 2024 Developed by Chekri Khalife @Maids.cc. All rights reserved.",
-                        className="text-center text-muted",
-                        style={'fontSize': '0.9rem'}
-                    )
-                ])
+                    dbc.Row([
+                        dbc.Col([
+                            html.P([
+                                "© 2024 Developed by Chekri Khalife @",
+                                html.A("Maids.cc", href="https://maids.cc", className="text-primary"),
+                                ". All rights reserved."
+                            ], className="text-center text-muted mb-0"),
+                            html.P([
+                                html.I(className="fas fa-code me-2"),
+                                "Built with Dash and ❤️"
+                            ], className="text-center text-muted small mt-1")
+                        ])
+                    ])
+                ], className="py-3")
             ])
         ])
 
     def setup_callbacks(self):
+        """Set up enhanced callbacks with new filter functionality."""
+        
+        @self.app.callback(
+            [Output('stage-filter', 'value'),
+             Output('type-filter', 'value'),
+             Output('nationality-filter', 'value'),
+             Output('client-note-filter', 'value')],
+            [Input('reset-filters-btn', 'n_clicks')],
+            prevent_initial_call=True
+        )
+        def reset_filters(n_clicks):
+            """Reset all filters to their default state."""
+            return None, None, None, None
+
         @self.app.callback(
             [Output('kpi-cards', 'children'),
-            Output('client-priority-chart', 'figure'),
-            Output('priority-stage-chart', 'figure'),
-            Output('detailed-table', 'data'),
-            Output('detailed-table', 'columns'),
-            Output('stage-filter', 'options'),
-            Output('type-filter', 'options'),
-            Output('nationality-filter', 'options'),
-            Output('last-update', 'children'),
-            Output('alerts-area', 'children')],
+             Output('client-priority-chart', 'figure'),
+             Output('priority-stage-chart', 'figure'),
+             Output('detailed-table', 'data'),
+             Output('detailed-table', 'columns'),
+             Output('stage-filter', 'options'),
+             Output('type-filter', 'options'),
+             Output('nationality-filter', 'options'),
+             Output('last-update', 'children'),
+             Output('alerts-area', 'children')],
             [Input('upload-data', 'contents'),
-            Input('stage-filter', 'value'),
-            Input('type-filter', 'value'),
-            Input('nationality-filter', 'value'),
-            Input('client-note-filter', 'value'),
-            Input('table-search', 'value'),
-            Input('table-sort-field', 'value'),
-            Input('records-per-page', 'value')],
+             Input('apply-filters-btn', 'n_clicks'),
+             State('stage-filter', 'value'),
+             State('type-filter', 'value'),
+             State('nationality-filter', 'value'),
+             State('client-note-filter', 'value'),
+             Input('table-search', 'value'),
+             Input('table-sort-field', 'value'),
+             Input('records-per-page', 'value')],
             [State('upload-data', 'filename')]
         )
-        def update_dashboard(contents, stage_filter, type_filter, nationality_filter,
-                        client_note_filter, search_value, sort_field,
-                        records_per_page, filename):
+        def update_dashboard(contents, n_clicks, stage_filter, type_filter, nationality_filter,
+                           client_note_filter, search_value, sort_field,
+                           records_per_page, filename):
+            """Update dashboard with enhanced filtering and sorting."""
             # Initialize outputs
             empty_returns = [[], {}, {}, [], [], [], [], [], "", None]
             
@@ -399,18 +461,20 @@ class DelayedMaidsAnalytics:
                 elif filename.endswith('.csv'):
                     self.df = pd.read_csv(io.BytesIO(decoded))
                 else:
-                    raise ValueError("Unsupported file format")
+                    raise ValueError("Unsupported file format. Please upload an Excel (.xlsx) or CSV file.")
                 
                 self.df = self.process_data(self.df)
             except Exception as e:
                 return empty_returns[:-1] + [
-                    dbc.Alert(f"Error processing file: {str(e)}", color="danger", dismissable=True)
+                    dbc.Alert([
+                        html.I(className="fas fa-exclamation-circle me-2"),
+                        f"Error processing file: {str(e)}"
+                    ], color="danger", dismissable=True, className="d-flex align-items-center")
                 ]
 
             # Apply filters
             filtered_df = self.df.copy()
             
-            # Basic filters
             if stage_filter:
                 filtered_df = filtered_df[filtered_df['Current Stage'].isin(stage_filter)]
             if type_filter:
@@ -420,7 +484,7 @@ class DelayedMaidsAnalytics:
             if client_note_filter:
                 filtered_df = filtered_df[filtered_df['Client Note'].isin(client_note_filter)]
                 
-            # Search filter
+            # Enhanced search functionality
             if search_value:
                 search = search_value.lower()
                 filtered_df = filtered_df[
@@ -434,23 +498,29 @@ class DelayedMaidsAnalytics:
             client_priority_fig = self.create_client_priority_chart(filtered_df)
             priority_stage_fig = self.create_priority_stage_chart(filtered_df)
 
-            # Sort by Time in Stage by default
-            filtered_df = filtered_df.sort_values('Time in Stage', ascending=False)
-            
-            # Additional sorting if specified
+            # Enhanced sorting
             if sort_field:
                 filtered_df = filtered_df.sort_values(sort_field, ascending=False)
             
+            # Prepare table data with formatted values
             table_data = filtered_df.to_dict('records')
             columns = [{'name': i, 'id': i} for i in filtered_df.columns]
 
-            # Create filter options
-            stage_options = [{'label': x, 'value': x} for x in sorted(self.df['Current Stage'].unique())]
-            type_options = [{'label': x, 'value': x} for x in sorted(self.df['Type'].unique())]
-            nationality_options = [{'label': x, 'value': x} for x in sorted(self.df['Nationality'].unique())]
+            # Create filter options with counts
+            def create_options_with_counts(column):
+                value_counts = self.df[column].value_counts()
+                return [{'label': f"{x} ({value_counts[x]})", 'value': x} 
+                       for x in sorted(self.df[column].unique())]
 
-            # Update time
-            update_time = f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            stage_options = create_options_with_counts('Current Stage')
+            type_options = create_options_with_counts('Type')
+            nationality_options = create_options_with_counts('Nationality')
+
+            # Update time with enhanced formatting
+            update_time = html.Span([
+                html.I(className="fas fa-clock me-1"),
+                f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            ])
 
             return (
                 kpi_cards, client_priority_fig, priority_stage_fig,
@@ -458,200 +528,19 @@ class DelayedMaidsAnalytics:
                 update_time, None
             )
 
-    def create_kpi_cards(self, df):
-        """Create enhanced KPI cards with key metrics."""
-        total_cases = len(df)
-        if total_cases == 0:  # Handle empty dataframe case
-            return [
-                dbc.Col(
-                    dbc.Card([
-                        dbc.CardBody([
-                            html.H3("0", className="text-primary"),
-                            html.P("Total Delayed Cases", className="mb-1"),
-                            html.Div([
-                                html.I(className="fas fa-users me-2"),
-                                html.Span("0% Critical")
-                            ], className="text-muted small")
-                        ])
-                    ], className="border-start border-primary border-4 shadow-sm h-100")
-                ) for _ in range(4)  # Create 4 empty cards
-            ]
-        
-        avg_delay = df['Delay (hours)'].mean()
-        critical_cases = len(df[df['Severity'] == 'Critical'])
-        angry_clients = len(df[df['Client Note'] == 'SUPER_ANGRY_CLIENT'])
-        
-        cards = [
-            dbc.Col(
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H3(f"{total_cases:,}", className="text-primary"),
-                        html.P("Total Delayed Cases", className="mb-1"),
-                        html.Div([
-                            html.I(className="fas fa-users me-2"),
-                            html.Span(f"{(critical_cases/total_cases*100):.1f}% Critical")
-                        ], className="text-muted small")
-                    ])
-                ], className="border-start border-primary border-4 shadow-sm h-100")
-            ),
-            dbc.Col(
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H3(f"{angry_clients:,}", className="text-danger"),
-                        html.P("Super Angry Clients", className="mb-1"),
-                        html.Div([
-                            html.I(className="fas fa-exclamation-circle me-2"),
-                            html.Span(f"{(angry_clients/total_cases*100):.1f}% of Total")
-                        ], className="text-danger small")
-                    ])
-                ], className="border-start border-danger border-4 shadow-sm h-100")
-            ),
-            dbc.Col(
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H3(f"{avg_delay:.1f}", className="text-warning"),
-                        html.P("Average Delay (Hours)", className="mb-1"),
-                        html.Div([
-                            html.I(className="fas fa-clock me-2"),
-                            html.Span("Hours per Case")
-                        ], className="text-warning small")
-                    ])
-                ], className="border-start border-warning border-4 shadow-sm h-100")
-            ),
-            dbc.Col(
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H3(f"{critical_cases:,}", className="text-danger"),
-                        html.P("Critical Cases", className="mb-1"),
-                        html.Div([
-                            html.I(className="fas fa-exclamation-triangle me-2"),
-                            html.Span(f"Exceeded threshold by >200%")
-                        ], className="text-danger small")
-                    ])
-                ], className="border-start border-danger border-4 shadow-sm h-100")
-            )
-        ]
-        return cards
-
-    def create_client_priority_chart(self, df):
-        """Create enhanced client priority distribution chart."""
-        priority_metrics = df.groupby('Client Note').agg({
-            'Delay (hours)': ['mean', 'count', 'sum'],
-            'Priority Score': 'mean'
-        }).reset_index()
-        
-        priority_metrics.columns = ['Client Note', 'Avg Delay', 'Count', 'Total Delay', 'Avg Priority']
-        
-        priority_order = ['SUPER_ANGRY_CLIENT', 'PRIORITIZE_VISA', 'AMNESTY', 'STANDARD']
-        priority_metrics['Client Note'] = pd.Categorical(
-            priority_metrics['Client Note'], 
-            categories=priority_order, 
-            ordered=True
-        )
-        priority_metrics = priority_metrics.sort_values('Client Note')
-        
-        fig = go.Figure()
-        
-        fig.add_trace(go.Bar(
-            name='Average Delay',
-            x=priority_metrics['Client Note'],
-            y=priority_metrics['Avg Delay'],
-            text=priority_metrics['Count'].apply(lambda x: f'Cases: {x}'),
-            textposition='auto',
-            marker_color=['#d32f2f', '#f57c00', '#388e3c', '#1976d2'],
-            hovertemplate=(
-                '<b>%{x}</b><br>' +
-                'Average Delay: %{y:.1f} hours<br>' +
-                '%{text}<br>' +
-                'Total Delay: %{customdata[0]:.0f} hours<br>' +
-                'Avg Priority Score: %{customdata[1]:.0f}<br>' +
-                '<extra></extra>'
-            ),
-            customdata=np.column_stack((
-                priority_metrics['Total Delay'],
-                priority_metrics['Avg Priority']
-            ))
-        ))
-        
-        fig.update_layout(
-            title=None,
-            xaxis_title="Client Priority Level",
-            yaxis_title="Average Delay (hours)",
-            showlegend=False,
-            height=300,
-            margin=dict(l=20, r=20, t=20, b=20)
-        )
-        
-        return fig
-
-    def create_priority_stage_chart(self, df):
-        """Create enhanced priority stage distribution chart showing case counts."""
-        if len(df) == 0:  # Handle empty dataframe case
-            return go.Figure()
-        
-        # Create pivot table with counts instead of delays
-        pivot_data = pd.crosstab(
-            df['Current Stage'],
-            df['Client Note']
-        ).fillna(0)
-        
-        # Sort by total cases
-        total_cases = pivot_data.sum(axis=1)
-        pivot_data = pivot_data.loc[total_cases.sort_values(ascending=True).index]
-        pivot_data = pivot_data.tail(10)  # Show top 10 stages by case count
-        
-        fig = go.Figure()
-        
-        colors = {
-            'SUPER_ANGRY_CLIENT': '#d32f2f',
-            'PRIORITIZE_VISA': '#f57c00',
-            'AMNESTY': '#388e3c',
-            'STANDARD': '#1976d2'
-        }
-        
-        for client_type in pivot_data.columns:
-            fig.add_trace(go.Bar(
-                name=client_type,
-                y=pivot_data.index,
-                x=pivot_data[client_type],
-                orientation='h',
-                marker_color=colors.get(client_type, '#000000'),
-                hovertemplate=(
-                    '<b>%{y}</b><br>' +
-                    f'{client_type}<br>' +
-                    'Number of Cases: %{x}<br>' +
-                    '<extra></extra>'
-                )
-            ))
-        
-        fig.update_layout(
-            title=None,
-            barmode='stack',
-            height=400,
-            margin=dict(l=20, r=20, t=20, b=20),
-            legend_title="Client Priority",
-            xaxis_title="Number of Cases",
-            yaxis={'categoryorder': 'total ascending'},
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
-            ),
-            showlegend=True
-        )
-        
-        fig.update_yaxes(
-            tickfont=dict(size=10),
-            tickangle=0
-        )
-        
-        return fig
-
     def add_custom_css(self):
         """Add enhanced custom CSS styles."""
         custom_css = """
+            :root {
+                --primary-color: #1976d2;
+                --secondary-color: #2196f3;
+                --background-color: #f8f9fa;
+            }
+            
+            body {
+                background-color: var(--background-color);
+            }
+            
             .sticky-top {
                 top: 20px;
                 z-index: 1000;
@@ -659,38 +548,74 @@ class DelayedMaidsAnalytics:
             
             .card {
                 border: none;
-                border-radius: 10px;
-                box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.15) !important;
+                border-radius: 12px;
+                box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.1) !important;
                 margin-bottom: 1.5rem !important;
-                transition: all 0.3s ease-in-out;
+                transition: all 0.2s ease-in-out;
             }
             
             .card:hover {
                 transform: translateY(-2px);
+                box-shadow: 0 0.15rem 2.5rem 0 rgba(58, 59, 69, 0.15) !important;
             }
             
             .card-header {
                 background-color: white;
                 border-bottom: 1px solid rgba(0,0,0,.125);
-                padding: 1rem;
+                padding: 1.25rem;
+                border-radius: 12px 12px 0 0 !important;
             }
             
-            .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td {
+            .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td,
+            .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner th {
                 font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
                 font-size: 14px;
-                padding: 8px;
+                padding: 12px;
+                border: 1px solid #dee2e6;
+            }
+            
+            .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner th {
+                font-weight: 600;
+                background-color: #f8f9fa;
             }
             
             .dropdown-container .Select-control {
-                border-radius: 5px;
+                border-radius: 8px;
+                border: 1px solid #dee2e6;
             }
             
             .dash-table-container {
-                overflow-x: auto;
+                border-radius: 12px;
+                overflow: hidden;
             }
             
             .dash-filter input {
-                border-radius: 5px;
+                border-radius: 8px;
+                border: 1px solid #dee2e6;
+                padding: 8px 12px;
+            }
+            
+            .btn {
+                border-radius: 8px;
+                padding: 8px 16px;
+            }
+            
+            .btn-primary {
+                background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+                border: none;
+            }
+            
+            .btn-primary:hover {
+                background: linear-gradient(135deg, var(--secondary-color) 0%, var(--primary-color) 100%);
+            }
+            
+            .form-control {
+                border-radius: 8px;
+                padding: 8px 12px;
+            }
+            
+            .navbar {
+                border-radius: 0 0 12px 12px;
             }
         """
         self.app.index_string = self.app.index_string.replace(
@@ -714,12 +639,7 @@ class DelayedMaidsAnalytics:
         self.app.run_server(debug=debug, port=port, host=host)
 
 
-app = DelayedMaidsAnalytics()
-app.create_layout()
-app.setup_callbacks()
-app.add_custom_css()
-server = app.app.server 
-
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 8000))  
+    app = DelayedMaidsAnalytics()
+    port = int(os.environ.get("PORT", 8050))
     app.run_server(host='0.0.0.0', port=port)
