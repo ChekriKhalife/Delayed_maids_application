@@ -1734,5 +1734,7 @@ class DelayedMaidsAnalytics:
  
 if __name__ == '__main__':
     app = DelayedMaidsAnalytics()
+    server = app.server  # Ensure this is accessible for Gunicorn
     port = int(os.environ.get("PORT", 8050))
     app.run_server(host='0.0.0.0', port=port)
+
