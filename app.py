@@ -8,8 +8,16 @@ from datetime import datetime
 import numpy as np
 import base64
 import io
+import gspread
+import os
+from oauth2client.service_account import ServiceAccountCredentials
+from dataclasses import dataclass
+from typing import Dict, Optional
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+import json
 
-# Constants
+# Constants remain the same
 TASK_THRESHOLDS = {
     'Apply for Work Permit - Stage 1': 168,
     'Pay MOHRE Insurance': 24,
@@ -34,6 +42,239 @@ TASK_THRESHOLDS = {
     'Receival of EID Card': 168
 }
 
+@dataclass
+class User:
+    name: str
+    google_sheet_id: str
+    active: bool = True
+    workload: int = 0
+
+@dataclass
+class User:
+    name: str
+    google_sheet_id: str
+    active: bool = True
+    workload: int = 0  # Track how many tasks assigned
+
+class UserManager:
+    def __init__(self):
+        self.users: Dict[str, User] = {
+            "razan.hassan": User(
+                name="Razan Hassan",
+                google_sheet_id="14dpPJUFwMXTFemq8b2as3Jpwj_Qs-kplradlM63lS_U"
+            ),
+            "aya.tahawi": User(
+                name="Aya Tahawi",
+                google_sheet_id="1hkB77aTFTalcZtUG9xfNKH3b7nIgYAZP1-AF6Ob7szE"
+            ),
+            "maya.dayoub": User(
+                name="Maya Dayoub",
+                google_sheet_id="1fDaIXfSGEKlUTlVprS7_SjG1wbhaGk1kVLvZXTia6QU"
+            ),
+            "laila.alhafi": User(
+                name="Laila Alhafi",
+                google_sheet_id="1nCzh8FMZOGa2x7v_OLIUtVEtAc4hzUG3f-rIgHJgEF8"
+            ),
+            "ehab.joud": User(
+                name="Ehab Joud",
+                google_sheet_id="1WccFTrR-Izh4qpRSnDD9A_nq8MWm0l54fqFJu4eJPYY"
+            ),
+            "hala.khaddour": User(
+                name="Hala Khaddour",
+                google_sheet_id="1_zM3sANFMHXvjSFvIHCtG2sKiS7GBWk8haUCoYBm1XU"
+            ),
+            "marah.ghanem": User(
+                name="Marah Ghanem",
+                google_sheet_id="1z88anA3_FKx6xo3fc4bci22-J8naoiEYdbcK8eiN8CM"
+            )
+        }
+        self.setup_google_sheets()
+    
+    
+    def validate_sheet_access(self, sheet_id):
+        """Validate that we can access and modify the sheet"""
+        try:
+            sheet = self.client.open_by_key(sheet_id).sheet1
+            # Try to write something to verify we have write access
+            sheet.update_cell(1, 1, "test")
+            sheet.clear()  # Clear the test
+            return True
+        except Exception as e:
+            print(f"Sheet validation error: {str(e)}")
+            return False
+
+    def extract_sheet_id(self, sheet_url: str) -> str:
+        """Extract Google Sheet ID from URL."""
+        try:
+            if not sheet_url:
+                raise ValueError("No URL provided")
+                
+            # Handle different URL formats
+            if '/spreadsheets/d/' in sheet_url:
+                sheet_id = sheet_url.split('/spreadsheets/d/')[1].split('/')[0]
+            elif 'key=' in sheet_url:
+                sheet_id = sheet_url.split('key=')[1].split('&')[0]
+            elif len(sheet_url.strip()) == 44:  # Direct sheet ID
+                sheet_id = sheet_url.strip()
+            else:
+                raise ValueError("Invalid Google Sheet URL format")
+                
+            # Validate ID format (basic check)
+            if not sheet_id or len(sheet_id) != 44:
+                raise ValueError("Invalid sheet ID format")
+                
+            return sheet_id
+        except Exception as e:
+            print(f"Error extracting sheet ID: {str(e)}")
+            raise ValueError(f"Could not extract sheet ID: {str(e)}")
+        
+    def setup_google_sheets(self):
+        """Initialize Google Sheets connection"""
+        scope = ['https://spreadsheets.google.com/feeds',
+                'https://www.googleapis.com/auth/drive']
+        
+        # Add your credentials file path
+        creds = ServiceAccountCredentials.from_json_keyfile_name(
+            'service_account_key.json', scope)
+        self.client = gspread.authorize(creds)
+
+    def add_user(self, username: str, name: str, sheet_id: str) -> bool:
+        """Add a new user"""
+        try:
+            # First validate sheet access
+            if not self.validate_sheet_access(sheet_id):
+                raise Exception("Cannot access or modify sheet. Please check sharing settings.")
+                
+            self.users[username] = User(name=name, google_sheet_id=sheet_id)
+            self._save_user_config()
+            return True
+        except Exception as e:
+            print(f"Error adding user: {str(e)}")
+            return False
+
+    def update_user(self, username: str, name: str = None, sheet_id: str = None) -> bool:
+        """Update user details"""
+        if username not in self.users:
+            return False
+        
+        try:
+            if sheet_id:
+                self.client.open_by_key(sheet_id)
+                self.users[username].google_sheet_id = sheet_id
+            if name:
+                self.users[username].name = name
+            self._save_user_config()
+            return True
+        except Exception as e:
+            print(f"Error updating user: {str(e)}")
+            return False
+
+    def delete_user(self, username: str) -> bool:
+        """Delete a user completely from the system"""
+        try:
+            if username in self.users:
+                del self.users[username]
+                self._save_user_config()
+                return True
+            return False
+        except Exception as e:
+            print(f"Error deleting user: {str(e)}")
+            return False
+    def distribute_data(self, usernames: list, data: pd.DataFrame) -> dict:
+        """Distribute data evenly among users"""
+        if not usernames or data.empty:
+            return {"error": "No users selected or no data to distribute"}
+
+        results = {}
+        try:
+            # Reset workload counters
+            for user in self.users.values():
+                user.workload = 0
+
+            # Calculate number of records per user
+            total_records = len(data)
+            base_records_per_user = total_records // len(usernames)
+            extra_records = total_records % len(usernames)
+
+            start_idx = 0
+            for username in usernames:
+                if username not in self.users:
+                    results[username] = "User not found"
+                    continue
+
+                # Calculate records for this user
+                records_for_user = base_records_per_user
+                if extra_records > 0:
+                    records_for_user += 1
+                    extra_records -= 1
+
+                end_idx = start_idx + records_for_user
+                user_data = data.iloc[start_idx:end_idx]
+                start_idx = end_idx
+
+                # Update the user's Google Sheet
+                try:
+                    sheet = self.client.open_by_key(self.users[username].google_sheet_id).sheet1
+                    sheet.clear()
+                    
+                    if not user_data.empty:
+                        # Update headers
+                        headers = user_data.columns.tolist()
+                        sheet.update('A1', [headers])
+                        
+                        # Update data
+                        values = user_data.values.tolist()
+                        if values:
+                            sheet.update('A2', values)
+                        
+                        # Update workload counter
+                        self.users[username].workload = len(values)
+                        results[username] = f"Successfully assigned {len(values)} tasks"
+                    else:
+                        results[username] = "No tasks assigned"
+
+                except Exception as e:
+                    results[username] = f"Error: {str(e)}"
+
+            self._save_user_config()  # Save updated workload info
+            return results
+
+        except Exception as e:
+            return {"error": f"Distribution failed: {str(e)}"}
+
+    def _save_user_config(self):
+        """Save user configuration to a JSON file"""
+        config = {
+            username: {
+                "name": user.name,
+                "sheet_id": user.google_sheet_id,
+                "active": user.active,
+                "workload": user.workload
+            }
+            for username, user in self.users.items()
+        }
+        with open('user_config.json', 'w') as f:
+            json.dump(config, f, indent=2)
+
+    def _load_user_config(self):
+        """Load user configuration from JSON file"""
+        try:
+            with open('user_config.json', 'r') as f:
+                config = json.load(f)
+                self.users = {
+                    username: User(
+                        name=data["name"],
+                        google_sheet_id=data["sheet_id"],
+                        active=data["active"],
+                        workload=data.get("workload", 0)
+                    )
+                    for username, data in config.items()
+                }
+        except FileNotFoundError:
+            # Use default configuration if file doesn't exist
+            pass
+
+
 class DelayedMaidsAnalytics:
     def __init__(self):
         self.app = dash.Dash(
@@ -42,10 +283,268 @@ class DelayedMaidsAnalytics:
                 dbc.themes.FLATLY,
                 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css'
             ],
-            title="Delayed Cases Analytics"
+            title="Delayed Cases Analytics",
+            prevent_initial_callbacks='initial_duplicate'  # Add this line
         )
         self.df = pd.DataFrame()
+        self.user_manager = UserManager()
+        
+    def create_kpi_cards(self, df):
+        """Create KPI cards with metrics."""
+        total_cases = len(df)
+        if total_cases == 0:
+            return [
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H3("0", className="text-primary mb-1"),
+                            html.P("Total Delayed Cases", className="mb-1"),
+                            html.Div([
+                                html.I(className="fas fa-users me-2"),
+                                html.Span("No data available")
+                            ], className="text-muted small")
+                        ])
+                    ], className="border-start border-primary border-4 h-100")
+                ], width=3) for _ in range(4)
+            ]
+        
+        critical_cases = len(df[df['Severity'] == 'Critical'])
+        angry_clients = len(df[df['Client Note'] == 'SUPER_ANGRY_CLIENT'])
+        avg_delay = df['Delay (hours)'].mean()
+        highest_priority = df['Priority Score'].max()
+        
+        cards = [
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H3([
+                            f"{total_cases:,}",
+                            html.Span("cases", className="fs-6 ms-2 text-muted")
+                        ], className="text-primary mb-1"),
+                        html.P("Total Delayed Cases", className="mb-1"),
+                        html.Div([
+                            html.I(className="fas fa-users me-2"),
+                            html.Span(f"{(critical_cases/total_cases*100):.1f}% Critical")
+                        ], className="text-muted small")
+                    ])
+                ], className="border-start border-primary border-4 h-100")
+            ], width=3),
+            
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H3([
+                            f"{angry_clients:,}",
+                            html.Span("clients", className="fs-6 ms-2 text-muted")
+                        ], className="text-danger mb-1"),
+                        html.P("Super Angry Clients", className="mb-1"),
+                        html.Div([
+                            html.I(className="fas fa-exclamation-circle me-2"),
+                            html.Span(f"{(angry_clients/total_cases*100):.1f}% of Total")
+                        ], className="text-danger small")
+                    ])
+                ], className="border-start border-danger border-4 h-100")
+            ], width=3),
+            
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H3([
+                            f"{avg_delay:.1f}",
+                            html.Span("hours", className="fs-6 ms-2 text-muted")
+                        ], className="text-warning mb-1"),
+                        html.P("Average Delay", className="mb-1"),
+                        html.Div([
+                            html.I(className="fas fa-clock me-2"),
+                            html.Span("Per Case")
+                        ], className="text-warning small")
+                    ])
+                ], className="border-start border-warning border-4 h-100")
+            ], width=3),
+            
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H3([
+                            f"{critical_cases:,}",
+                            html.Span("cases", className="fs-6 ms-2 text-muted")
+                        ], className="text-danger mb-1"),
+                        html.P("Critical Cases", className="mb-1"),
+                        html.Div([
+                            html.I(className="fas fa-exclamation-triangle me-2"),
+                            html.Span(f"Highest Priority: {int(highest_priority)}")
+                        ], className="text-danger small")
+                    ])
+                ], className="border-start border-danger border-4 h-100")
+            ], width=3)
+        ]
+        
+        return cards
 
+    def create_client_priority_chart(self, df):
+        """Create enhanced client priority distribution chart."""
+        priority_metrics = df.groupby('Client Note').agg({
+            'Delay (hours)': ['mean', 'count', 'sum'],
+            'Priority Score': 'mean'
+        }).reset_index()
+        
+        priority_metrics.columns = ['Client Note', 'Avg Delay', 'Count', 'Total Delay', 'Avg Priority']
+        
+        # Define priority order and colors
+        priority_order = ['SUPER_ANGRY_CLIENT', 'PRIORITIZE_VISA', 'AMNESTY', 'STANDARD']
+        priority_colors = {
+            'SUPER_ANGRY_CLIENT': '#d32f2f',
+            'PRIORITIZE_VISA': '#f57c00',
+            'AMNESTY': '#388e3c',
+            'STANDARD': '#1976d2'
+        }
+        
+        priority_metrics['Client Note'] = pd.Categorical(
+            priority_metrics['Client Note'],
+            categories=priority_order,
+            ordered=True
+        )
+        priority_metrics = priority_metrics.sort_values('Client Note')
+        
+        fig = go.Figure()
+        
+        fig.add_trace(go.Bar(
+            name='Average Delay',
+            x=priority_metrics['Client Note'],
+            y=priority_metrics['Avg Delay'],
+            text=[f'Cases: {int(x)}' for x in priority_metrics['Count']],
+            textposition='auto',
+            marker_color=[priority_colors.get(x, '#1976d2') for x in priority_metrics['Client Note']],
+            hovertemplate=(
+                '<b>%{x}</b><br>' +
+                'Average Delay: %{y:.1f} hours<br>' +
+                '%{text}<br>' +
+                'Total Delay: %{customdata[0]:.0f} hours<br>' +
+                'Avg Priority Score: %{customdata[1]:.0f}<br>' +
+                '<extra></extra>'
+            ),
+            customdata=np.column_stack((
+                priority_metrics['Total Delay'],
+                priority_metrics['Avg Priority']
+            ))
+        ))
+        
+        # Fixed layout to avoid duplicate yaxis
+        fig.update_layout(
+            title=None,
+            xaxis_title="Client Priority Level",
+            yaxis_title="Average Delay (hours)",
+            showlegend=False,
+            height=300,
+            margin=dict(l=20, r=20, t=20, b=20),
+            plot_bgcolor='white',
+            paper_bgcolor='white'
+        )
+        
+        # Update axes separately
+        fig.update_xaxes(
+            showgrid=False,
+            showline=True,
+            linecolor='rgb(204, 204, 204)',
+            linewidth=2,
+            ticks='outside',
+            tickfont=dict(size=12)
+        )
+        
+        fig.update_yaxes(
+            showgrid=True,
+            gridcolor='rgb(204, 204, 204)',
+            showline=True,
+            linecolor='rgb(204, 204, 204)',
+            linewidth=2,
+            ticks='outside',
+            tickfont=dict(size=12)
+        )
+        
+        return fig
+
+    def create_priority_stage_chart(self, df):
+        """Create enhanced priority stage distribution chart."""
+        if len(df) == 0:
+            return go.Figure()
+        
+        pivot_data = pd.crosstab(
+            df['Current Stage'],
+            df['Client Note']
+        ).fillna(0)
+        
+        total_cases = pivot_data.sum(axis=1)
+        pivot_data = pivot_data.loc[total_cases.sort_values(ascending=True).index]
+        pivot_data = pivot_data.tail(10)
+        
+        colors = {
+            'SUPER_ANGRY_CLIENT': '#d32f2f',
+            'PRIORITIZE_VISA': '#f57c00',
+            'AMNESTY': '#388e3c',
+            'STANDARD': '#1976d2'
+        }
+        
+        fig = go.Figure()
+        
+        for client_type in pivot_data.columns:
+            fig.add_trace(go.Bar(
+                name=client_type,
+                y=pivot_data.index,
+                x=pivot_data[client_type],
+                orientation='h',
+                marker_color=colors.get(client_type, '#1976d2'),
+                hovertemplate=(
+                    '<b>%{y}</b><br>' +
+                    f'{client_type}<br>' +
+                    'Number of Cases: %{x}<br>' +
+                    '<extra></extra>'
+                )
+            ))
+        
+        # Fixed layout to avoid duplicate yaxis
+        fig.update_layout(
+            title=None,
+            barmode='stack',
+            height=400,
+            margin=dict(l=20, r=20, t=20, b=20),
+            legend_title="Client Priority",
+            xaxis_title="Number of Cases",
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            ),
+            showlegend=True,
+            plot_bgcolor='white',
+            paper_bgcolor='white'
+        )
+        
+        # Update axes separately
+        fig.update_xaxes(
+            showgrid=True,
+            gridcolor='rgb(204, 204, 204)',
+            showline=True,
+            linecolor='rgb(204, 204, 204)',
+            linewidth=2,
+            ticks='outside'
+        )
+        
+        fig.update_yaxes(
+            categoryorder='total ascending',
+            showgrid=False,
+            showline=True,
+            linecolor='rgb(204, 204, 204)',
+            linewidth=2,
+            ticks='outside',
+            tickfont=dict(size=10),
+            tickangle=0
+        )
+        
+        return fig
+    
+    
     def process_data(self, df):
         """Process the uploaded data with proper handling of all fields."""
         try:
@@ -57,7 +556,7 @@ class DelayedMaidsAnalytics:
             
             # Handle numeric fields
             df['RPA try count'] = pd.to_numeric(df['RPA try count'], errors='coerce').fillna(0).astype(int)
-            df['Time in Stage'] = pd.to_numeric(df['Time in Stage'], errors='coerce').fillna(0)
+            df['Time In Stage'] = pd.to_numeric(df['Time In Stage'], errors='coerce').fillna(0)
             
             # Handle text fields
             text_fields = {
@@ -80,20 +579,16 @@ class DelayedMaidsAnalytics:
             
             # Calculate delays and severity
             df['Threshold (in hours)'] = df['Current Stage'].map(TASK_THRESHOLDS).fillna(24)
-            df['Delay (hours)'] = (df['Time in Stage'] - df['Threshold (in hours)']).fillna(0)
+            df['Delay (hours)'] = (df['Time In Stage'] - df['Threshold (in hours)']).fillna(0)
             
-            # Calculate severity based on how much they've exceeded their threshold
-            df['Threshold Ratio'] = df['Time in Stage'] / df['Threshold (in hours)']
+            df['Threshold Ratio'] = df['Time In Stage'] / df['Threshold (in hours)']
             df['Severity'] = pd.cut(
                 df['Threshold Ratio'],
                 bins=[0, 1.5, 2, 3, float('inf')],
                 labels=['Low', 'Medium', 'High', 'Critical']
             ).fillna('Low')
             
-            # Calculate priority score
             df['Priority Score'] = df.apply(self._calculate_priority, axis=1)
-            
-            # Calculate total delay per housemaid
             df['Total Delay (hours)'] = df.groupby('Housemaid ID')['Delay (hours)'].transform('sum')
             
             return df
@@ -127,65 +622,147 @@ class DelayedMaidsAnalytics:
             return 0
 
     def create_layout(self):
-        """Create enhanced layout focusing on priority analysis and detailed cases."""
+        """Create enhanced layout with improved design and filter controls."""
         self.app.layout = html.Div([
-            # Header
+            # Enhanced Header with Gradient Background
             dbc.Navbar(
+                
                 dbc.Container([
-                    html.H2("Delayed Cases Analytics", className="text-white mb-0"),
-                    dcc.Upload(
-                        id='upload-data',
-                        children=dbc.Button(
-                            ["Upload Excel ", html.I(className="fas fa-upload")],
-                            color="light",
-                            className="me-2"
+                    html.Div([
+                        html.I(className="fas fa-chart-line me-2"),
+                        html.H2("Delayed Cases Analytics", className="text-white mb-0"),
+                    ], className="d-flex align-items-center"),
+                    html.Div([
+                        dcc.Upload(
+                            id='upload-data',
+                            children=dbc.Button(
+                                ["Upload Excel ", html.I(className="fas fa-upload ms-1")],
+                                color="light",
+                                className="me-2"
+                            ),
+                            multiple=False
                         ),
-                        multiple=False
-                    ),
-                    html.Span(id='last-update', className="text-white ms-2")
+                        html.Span(id='last-update', className="text-white ms-2 small")
+                    ], className="d-flex align-items-center")
                 ]),
                 color="primary",
                 dark=True,
-                className="mb-3"
+                className="mb-3 shadow-sm",
+                style={'background': 'linear-gradient(135deg, #1976d2 0%, #2196f3 100%)'}
             ),
+            # Add this to your create_layout method, after the navbar
+           dbc.Modal([
+            dbc.ModalHeader("User Management"),
+            dbc.ModalBody([
+                # User List Table
+                html.Div([
+                    html.H6("Current Users", className="mb-3"),
+                    dash_table.DataTable(
+                        id='user-management-table',
+                        columns=[
+                            {'name': 'Username', 'id': 'username', 'type': 'text'},
+                            {'name': 'Display Name', 'id': 'name', 'type': 'text'},
+                            {'name': 'Sheet ID', 'id': 'sheet_id', 'type': 'text'},
+                            {'name': 'Status', 'id': 'status', 'type': 'text'},
+                            {'name': 'Tasks', 'id': 'workload', 'type': 'numeric'}
+                        ],
+                        data=[],
+                        style_table={'overflowX': 'auto'},
+                        style_cell={
+                            'textAlign': 'left',
+                            'padding': '12px',
+                        },
+                        style_header={
+                            'backgroundColor': '#f8f9fa',
+                            'fontWeight': 'bold'
+                        },
+                        row_selectable='single',
+                        selected_rows=[],
+                    ),
+                ], className="mb-4"),
+                
+                # Add/Edit User Form
+                dbc.Form([
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Label("Username"),
+                            dbc.Input(id="user-username", type="text", placeholder="e.g., john.doe")
+                        ], width=6),
+                        dbc.Col([
+                            dbc.Label("Display Name"),
+                            dbc.Input(id="user-displayname", type="text", placeholder="e.g., John Doe")
+                        ], width=6)
+                    ], className="mb-3"),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Label("Google Sheet URL"),
+                            dbc.Input(id="user-sheet-url", type="text", 
+                                    placeholder="Paste Google Sheet URL"),
+                            dbc.FormText("Paste the full Google Sheet URL or just the ID")
+                        ], width=12)
+                    ], className="mb-3"),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.ButtonGroup([
+                                dbc.Button("Add New User", id="add-user-btn", 
+                                        color="success", className="me-2"),
+                                dbc.Button("Update Selected", id="update-user-btn", 
+                                        color="primary", className="me-2"),
+                                dbc.Button("Delete Selected", id="delete-user-btn", 
+                                        color="danger")
+                            ])
+                        ])
+                    ])
+                ])
+            ])
+        ], id="user-management-modal", size="lg"),
 
+            # Add a button to open the modal in the navbar
+            dbc.Button(
+                ["Manage Users ", html.I(className="fas fa-users-cog")],
+                id="open-user-modal",
+                color="light",
+                className="me-2"
+            ),
             dbc.Container([
                 # Alert area
                 html.Div(id='alerts-area', className="mb-3"),
 
-                # Enhanced Filters
+                # Enhanced Filters Card
                 dbc.Card([
                     dbc.CardBody([
-                        html.H5("Filters", className="card-title mb-3"),
                         dbc.Row([
-                            dbc.Col(
+                            dbc.Col([
+                                html.H5([
+                                    html.I(className="fas fa-filter me-2"),
+                                    "Filters"
+                                ], className="card-title mb-3"),
+                            ], width=12),
+                            dbc.Col([
                                 dcc.Dropdown(
                                     id='stage-filter',
                                     placeholder="Filter by Stage",
                                     multi=True,
                                     className="mb-2"
-                                ),
-                                md=3
-                            ),
-                            dbc.Col(
+                                )
+                            ], md=3),
+                            dbc.Col([
                                 dcc.Dropdown(
                                     id='type-filter',
                                     placeholder="Filter by Type",
                                     multi=True,
                                     className="mb-2"
-                                ),
-                                md=3
-                            ),
-                            dbc.Col(
+                                )
+                            ], md=3),
+                            dbc.Col([
                                 dcc.Dropdown(
                                     id='nationality-filter',
                                     placeholder="Filter by Nationality",
                                     multi=True,
                                     className="mb-2"
-                                ),
-                                md=3
-                            ),
-                            dbc.Col(
+                                )
+                            ], md=3),
+                            dbc.Col([
                                 dcc.Dropdown(
                                     id='client-note-filter',
                                     options=[
@@ -197,57 +774,149 @@ class DelayedMaidsAnalytics:
                                     placeholder="Filter by Client Priority",
                                     multi=True,
                                     className="mb-2"
-                                ),
-                                md=3
-                            )
+                                )
+                            ], md=3)
                         ]),
-                        
-                    ])
-                ], className="mb-4 sticky-top bg-white", style={'zIndex': 1000}),
-
-                # Severity Legend
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H6("Understanding Severity Levels:", className="mb-3"),
                         dbc.Row([
                             dbc.Col([
-                                html.Div(className="d-flex align-items-center mb-2", children=[
-                                    html.Div(className="me-2", style={'width': '20px', 'height': '20px', 'backgroundColor': '#2196f3'}),
-                                    html.Span("Low: Up to 50% over threshold")
-                                ]),
-                                html.Div(className="d-flex align-items-center mb-2", children=[
-                                    html.Div(className="me-2", style={'width': '20px', 'height': '20px', 'backgroundColor': '#fdd835'}),
-                                    html.Span("Medium: 50-100% over threshold")
-                                ])
+                                dbc.ButtonGroup([
+                                    dbc.Button(
+                                        ["Apply Filters ", html.I(className="fas fa-check ms-1")],
+                                        id="apply-filters-btn",
+                                        color="primary",
+                                        className="me-2"
+                                    ),
+                                    dbc.Button(
+                                        ["Reset Filters ", html.I(className="fas fa-undo ms-1")],
+                                        id="reset-filters-btn",
+                                        color="secondary"
+                                    )
+                                ], className="mt-2")
+                            ], className="d-flex justify-content-end")
+                        ])
+                    ])
+                ], className="mb-4 shadow-sm"),
+
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.H5([
+                            html.I(className="fas fa-share me-2"),
+                            "Distribute Tasks"
+                        ])
+                    ]),
+                    dbc.CardBody([
+                        dbc.Row([
+                            dbc.Col([
+                                html.Label("Select Users to Assign Tasks", className="mb-2"),
+                                html.Div([
+                                    dcc.Dropdown(
+                                        id='users-to-distribute',
+                                        options=[
+                                            {'label': user.name, 'value': username}
+                                            for username, user in self.user_manager.users.items()
+                                            if user.active
+                                        ],
+                                        multi=True,
+                                        placeholder="Select users to distribute tasks to...",
+                                        className="mb-3"
+                                    )
+                                ], style={
+                                    'position': 'relative',
+                                    'zIndex': '1000'  # Higher z-index
+                                })
+                            ], width=8),
+                            dbc.Col([
+                                html.Label("\u00A0", className="mb-2"),
+                                dbc.Button(
+                                    ["Distribute Tasks ", html.I(className="fas fa-paper-plane ms-1")],
+                                    id="distribute-btn",
+                                    color="primary",
+                                    className="w-100"
+                                )
+                            ], width=4)
+                        ])
+                    ])
+                ], className="mb-4 shadow-sm"),
+                # Enhanced Severity Legend with Icons
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H6([
+                            html.I(className="fas fa-exclamation-triangle me-2", 
+                                style={'color': '#ff9800'}),
+                            "Understanding Severity Levels"
+                        ], className="text-primary mb-4"),
+                        dbc.Row([
+                            dbc.Col([
+                                html.Div([
+                                    html.Div([
+                                        html.Div(className="severity-dot low"),
+                                        html.Div(className="severity-pulse low")
+                                    ], className="severity-indicator-wrapper"),
+                                    html.Div([
+                                        html.Span("Low Priority", className="severity-title"),
+                                        html.Small("Up to 50% over threshold", 
+                                                className="severity-description")
+                                    ], className="severity-text")
+                                ], className="severity-item"),
+                                html.Div([
+                                    html.Div([
+                                        html.Div(className="severity-dot medium"),
+                                        html.Div(className="severity-pulse medium")
+                                    ], className="severity-indicator-wrapper"),
+                                    html.Div([
+                                        html.Span("Medium Priority", className="severity-title"),
+                                        html.Small("50-100% over threshold", 
+                                                className="severity-description")
+                                    ], className="severity-text")
+                                ], className="severity-item")
                             ], md=6),
                             dbc.Col([
-                                html.Div(className="d-flex align-items-center mb-2", children=[
-                                    html.Div(className="me-2", style={'width': '20px', 'height': '20px', 'backgroundColor': '#f57c00'}),
-                                    html.Span("High: 100-200% over threshold")
-                                ]),
-                                html.Div(className="d-flex align-items-center mb-2", children=[
-                                    html.Div(className="me-2", style={'width': '20px', 'height': '20px', 'backgroundColor': '#d32f2f'}),
-                                    html.Span("Critical: Over 200% threshold")
-                                ])
+                                html.Div([
+                                    html.Div([
+                                        html.Div(className="severity-dot high"),
+                                        html.Div(className="severity-pulse high")
+                                    ], className="severity-indicator-wrapper"),
+                                    html.Div([
+                                        html.Span("High Priority", className="severity-title"),
+                                        html.Small("100-200% over threshold", 
+                                                className="severity-description")
+                                    ], className="severity-text")
+                                ], className="severity-item"),
+                                html.Div([
+                                    html.Div([
+                                        html.Div(className="severity-dot critical"),
+                                        html.Div(className="severity-pulse critical")
+                                    ], className="severity-indicator-wrapper"),
+                                    html.Div([
+                                        html.Span("Critical Priority", className="severity-title"),
+                                        html.Small("Over 200% threshold", 
+                                                className="severity-description")
+                                    ], className="severity-text")
+                                ], className="severity-item")
                             ], md=6)
                         ])
                     ])
-                ], className="mb-4"),
+                ], className="mb-4 severity-card"),
 
-                # KPI Cards
+                # KPI Cards Row
                 dbc.Row(id='kpi-cards', className="mb-4"),
 
-                # Client Priority Analysis
+                # Enhanced Charts Section
                 dbc.Row([
                     dbc.Col([
                         dbc.Card([
-                            dbc.CardHeader("Client Priority Analysis"),
+                            dbc.CardHeader([
+                                html.H5([
+                                    html.I(className="fas fa-chart-bar me-2"),
+                                    "Client Priority Analysis"
+                                ], className="mb-0")
+                            ]),
                             dbc.CardBody([
                                 dcc.Graph(id='client-priority-chart'),
                                 html.Hr(),
                                 dcc.Graph(id='priority-stage-chart')
                             ])
-                        ])
+                        ], className="shadow-sm")
                     ], width=12)
                 ], className="mb-4"),
 
@@ -255,12 +924,17 @@ class DelayedMaidsAnalytics:
                 dbc.Card([
                     dbc.CardHeader([
                         dbc.Row([
-                            dbc.Col(html.H5("Detailed Cases Overview"), md=3),
+                            dbc.Col([
+                                html.H5([
+                                    html.I(className="fas fa-table me-2"),
+                                    "Detailed Cases Overview"
+                                ])
+                            ], md=3),
                             dbc.Col([
                                 dbc.Input(
                                     id='table-search',
                                     type='text',
-                                    placeholder='Search cases...',
+                                    placeholder='🔍 Search cases...',
                                     className="mb-2"
                                 )
                             ], md=3),
@@ -295,24 +969,27 @@ class DelayedMaidsAnalytics:
                     ]),
                     dbc.CardBody([
                         dash_table.DataTable(
-                        id='detailed-table',
-                        filter_action="native",
-                        sort_action="native",
-                        sort_mode="multi",
-                        sort_by=[{'column_id': 'Time in Stage', 'direction': 'desc'}],  # Set default sorting
-                        page_action="native",
-                        page_current=0,
-                        page_size=25,
+                            id='detailed-table',
+                            filter_action="native",
+                            sort_action="native",
+                            sort_mode="multi",
+                            sort_by=[{'column_id': 'Time in Stage', 'direction': 'desc'}],
+                            page_action="native",
+                            page_current=0,
+                            page_size=25,
                             style_table={'overflowX': 'auto'},
                             style_header={
                                 'backgroundColor': '#f8f9fa',
                                 'fontWeight': 'bold',
-                                'textAlign': 'center'
+                                'textAlign': 'center',
+                                'padding': '12px',
+                                'border': '1px solid #dee2e6'
                             },
                             style_cell={
                                 'textAlign': 'left',
-                                'padding': '10px',
-                                'fontSize': '14px'
+                                'padding': '12px',
+                                'fontSize': '14px',
+                                'fontFamily': '"Segoe UI", system-ui, -apple-system'
                             },
                             style_data_conditional=[
                                 {
@@ -342,23 +1019,239 @@ class DelayedMaidsAnalytics:
                                     'color': '#ef6c00'
                                 }
                             ],
-                            export_format="csv"
+                            export_format="csv",
+                            export_headers="display",
+                            merge_duplicate_headers=True
                         )
                     ])
-                ]),
-                # Footer
+                ], className="shadow-sm"),
+
+                # Enhanced Footer
                 html.Footer([
                     html.Hr(className="my-4"),
-                    html.P(
-                        "© 2024 Developed by Chekri Khalife @Maids.cc. All rights reserved.",
-                        className="text-center text-muted",
-                        style={'fontSize': '0.9rem'}
-                    )
-                ])
+                    dbc.Row([
+                        dbc.Col([
+                            html.P([
+                                "© 2024 Developed by Chekri Khalife @",
+                                html.A("Maids.cc", href="https://maids.cc", className="text-primary"),
+                                ". All rights reserved."
+                            ], className="text-center text-muted mb-0"),
+                            html.P([
+                                html.I(className="fas fa-code me-2"),
+                                
+                            ], className="text-center text-muted small mt-1")
+                        ])
+                    ])
+                ], className="py-3")
             ])
         ])
 
     def setup_callbacks(self):
+        """Set up enhanced callbacks with new filter functionality."""
+
+        # Callback for opening/closing the modal
+        @self.app.callback(
+            Output("user-management-modal", "is_open"),
+            [Input("open-user-modal", "n_clicks")],
+            [State("user-management-modal", "is_open")],
+            prevent_initial_call=True  # Add this line
+        )
+        def toggle_modal(n1, is_open):
+            if n1:
+                return not is_open
+            return is_open
+
+        # Callback for user management and table updates
+        @self.app.callback(
+            [Output('user-management-table', 'data'),
+            Output('alerts-area', 'children')],
+            [Input('user-management-modal', 'is_open'),
+            Input('add-user-btn', 'n_clicks'),
+            Input('update-user-btn', 'n_clicks'),
+            Input('delete-user-btn', 'n_clicks')],
+            [State('user-username', 'value'),
+            State('user-displayname', 'value'),
+            State('user-sheet-url', 'value'),
+            State('user-management-table', 'selected_rows'),
+            State('user-management-table', 'data')],
+            prevent_initial_call=True
+        )
+        def manage_users_and_table(is_open, add_clicks, update_clicks, delete_clicks,
+                          username, displayname, sheet_url, selected_rows, table_data):
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                user_data = [
+                    {
+                        'username': username,
+                        'name': user.name,
+                        'sheet_id': user.google_sheet_id,
+                        'status': 'Active' if user.active else 'Inactive',
+                        'workload': user.workload
+                    }
+                    for username, user in self.user_manager.users.items()
+                ]
+                return user_data, dash.no_update
+
+            trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            
+            if trigger_id == 'user-management-modal':
+                user_data = [
+                    {
+                        'username': username,
+                        'name': user.name,
+                        'sheet_id': user.google_sheet_id,
+                        'status': 'Active' if user.active else 'Inactive',
+                        'workload': user.workload
+                    }
+                    for username, user in self.user_manager.users.items()
+                ]
+                return user_data, dash.no_update
+
+            try:
+                if trigger_id == 'add-user-btn':
+                    if not all([username, displayname, sheet_url]):
+                        return dash.no_update, dbc.Alert(
+                            "All fields are required",
+                            color="warning",
+                            dismissable=True
+                        )
+                    
+                    try:
+                        sheet_id = self.user_manager.extract_sheet_id(sheet_url)
+                        if self.user_manager.add_user(username, displayname, sheet_id):
+                            alert = dbc.Alert(
+                                f"User {displayname} added successfully",
+                                color="success",
+                                dismissable=True
+                            )
+                        else:
+                            raise Exception("Failed to add user")
+                    except Exception as e:
+                        return dash.no_update, dbc.Alert(
+                            f"Error adding user: {str(e)}",
+                            color="danger",
+                            dismissable=True
+                        )
+
+                elif trigger_id == 'update-user-btn':
+                    if not selected_rows:
+                        return dash.no_update, dbc.Alert(
+                            "Please select a user to update",
+                            color="warning",
+                            dismissable=True
+                        )
+                    
+                    try:
+                        sheet_id = self.user_manager.extract_sheet_id(sheet_url) if sheet_url else None
+                        selected_username = table_data[selected_rows[0]]['username']
+                        if self.user_manager.update_user(selected_username, displayname, sheet_id):
+                            alert = dbc.Alert(
+                                f"User updated successfully",
+                                color="success",
+                                dismissable=True
+                            )
+                        else:
+                            raise Exception("Failed to update user")
+                    except Exception as e:
+                        return dash.no_update, dbc.Alert(
+                            f"Error updating user: {str(e)}",
+                            color="danger",
+                            dismissable=True
+                        )
+
+                elif trigger_id == 'delete-user-btn':
+                    if not selected_rows:
+                        return dash.no_update, dbc.Alert(
+                            "Please select a user to delete",
+                            color="warning",
+                            dismissable=True
+                        )
+                    
+                    try:
+                        selected_user = table_data[selected_rows[0]]['username']
+                        if self.user_manager.delete_user(selected_user):
+                            # Get updated user data after deletion
+                            user_data = [
+                                {
+                                    'username': username,
+                                    'name': user.name,
+                                    'sheet_id': user.google_sheet_id,
+                                    'status': 'Active' if user.active else 'Inactive',
+                                    'workload': user.workload
+                                }
+                                for username, user in self.user_manager.users.items()
+                            ]
+                            alert = dbc.Alert(
+                                f"User {selected_user} deleted successfully",
+                                color="success",
+                                dismissable=True
+                            )
+                            return user_data, alert
+                        else:
+                            raise Exception("Failed to delete user")
+                    except Exception as e:
+                        return dash.no_update, dbc.Alert(
+                            f"Error deleting user: {str(e)}",
+                            color="danger",
+                            dismissable=True
+                        )
+
+                # Get updated user data
+                user_data = [
+                    {
+                        'username': username,
+                        'name': user.name,
+                        'sheet_id': user.google_sheet_id,
+                        'status': 'Active' if user.active else 'Inactive',
+                        'workload': user.workload
+                    }
+                    for username, user in self.user_manager.users.items()
+                ]
+                
+                return user_data, alert
+
+            except Exception as e:
+                return dash.no_update, dbc.Alert(
+                    f"Error: {str(e)}",
+                    color="danger",
+                    dismissable=True
+                )
+
+        # Callback to populate form when selecting a user
+        @self.app.callback(
+            [Output('user-username', 'value'),
+            Output('user-displayname', 'value'),
+            Output('user-sheet-url', 'value')],
+            [Input('user-management-table', 'selected_rows')],
+            [State('user-management-table', 'data')],
+            prevent_initial_call=True
+        )
+        def populate_form(selected_rows, table_data):
+            """Populate form when user is selected"""
+            if not selected_rows:
+                return "", "", ""
+            
+            selected_user = table_data[selected_rows[0]]
+            return (
+                selected_user['username'],
+                selected_user['name'],
+                selected_user['sheet_id']
+            )
+
+        # Callback for reset filters
+        @self.app.callback(
+            [Output('stage-filter', 'value'),
+            Output('type-filter', 'value'),
+            Output('nationality-filter', 'value'),
+            Output('client-note-filter', 'value')],
+            [Input('reset-filters-btn', 'n_clicks')],
+            prevent_initial_call=True
+        )
+        def reset_filters(n_clicks):
+            """Reset all filters to their default state."""
+            return None, None, None, None
+
+        # Your existing update_dashboard callback
         @self.app.callback(
             [Output('kpi-cards', 'children'),
             Output('client-priority-chart', 'figure'),
@@ -369,21 +1262,89 @@ class DelayedMaidsAnalytics:
             Output('type-filter', 'options'),
             Output('nationality-filter', 'options'),
             Output('last-update', 'children'),
-            Output('alerts-area', 'children')],
+            Output('alerts-area', 'children', allow_duplicate=True)],
             [Input('upload-data', 'contents'),
-            Input('stage-filter', 'value'),
-            Input('type-filter', 'value'),
-            Input('nationality-filter', 'value'),
-            Input('client-note-filter', 'value'),
-            Input('table-search', 'value'),
-            Input('table-sort-field', 'value'),
-            Input('records-per-page', 'value')],
-            [State('upload-data', 'filename')]
+            Input('apply-filters-btn', 'n_clicks'),
+            Input('distribute-btn', 'n_clicks')],
+            [State('upload-data', 'filename'),
+            State('stage-filter', 'value'),
+            State('type-filter', 'value'),
+            State('nationality-filter', 'value'),
+            State('client-note-filter', 'value'),
+            State('table-search', 'value'),
+            State('table-sort-field', 'value'),
+            State('records-per-page', 'value'),
+            State('users-to-distribute', 'value'),
+            State('detailed-table', 'data')],
+            prevent_initial_call=True  # Add this line
         )
-        def update_dashboard(contents, stage_filter, type_filter, nationality_filter,
-                        client_note_filter, search_value, sort_field,
-                        records_per_page, filename):
-            # Initialize outputs
+        def update_dashboard(contents, filter_clicks, distribute_clicks,
+                      filename, stage_filter, type_filter,
+                      nationality_filter, client_note_filter,
+                      search_value, sort_field, records_per_page,
+                      selected_users, table_data):
+            """Update dashboard with enhanced filtering and sorting."""
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                return [[], {}, {}, [], [], [], [], [], "", None]
+            
+            trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            
+            # Handle distribution button click
+            if trigger_id == 'distribute-btn':
+                if not selected_users or not table_data:
+                    return dash.no_update, dash.no_update, dash.no_update, \
+                        dash.no_update, dash.no_update, dash.no_update, \
+                        dash.no_update, dash.no_update, dash.no_update, \
+                        dbc.Alert("Please select users and ensure there is data to distribute",
+                                color="warning", dismissable=True)
+                
+                try:
+                    df = pd.DataFrame(table_data)
+                    results = self.user_manager.distribute_data(selected_users, df)
+                    
+                    # Create summary of distribution results
+                    success_count = sum(1 for result in results.values() if result == "Success")
+                    
+                    if success_count == len(results):
+                        alert = dbc.Alert(
+                            f"Tasks successfully distributed to {success_count} users",
+                            color="success",
+                            dismissable=True,
+                            duration=4000
+                        )
+                    elif success_count > 0:
+                        alert = dbc.Alert(
+                            [
+                                f"Tasks distributed to {success_count}/{len(results)} users. ",
+                                html.Br(),
+                                "Errors: ",
+                                html.Br(),
+                                *[f"{user}: {msg}" for user, msg in results.items() if msg != "Success"]
+                            ],
+                            color="warning",
+                            dismissable=True
+                        )
+                    else:
+                        alert = dbc.Alert(
+                            ["Failed to distribute tasks: ",
+                            html.Br(),
+                            *[f"{user}: {msg}" for user, msg in results.items()]],
+                            color="danger",
+                            dismissable=True
+                        )
+                    
+                    return dash.no_update, dash.no_update, dash.no_update, \
+                        dash.no_update, dash.no_update, dash.no_update, \
+                        dash.no_update, dash.no_update, dash.no_update, alert
+                    
+                except Exception as e:
+                    return dash.no_update, dash.no_update, dash.no_update, \
+                        dash.no_update, dash.no_update, dash.no_update, \
+                        dash.no_update, dash.no_update, dash.no_update, \
+                        dbc.Alert(f"Error: {str(e)}", color="danger", dismissable=True)
+            
+            # Handle data upload and filtering (existing functionality)
             empty_returns = [[], {}, {}, [], [], [], [], [], "", None]
             
             if contents is None:
@@ -399,18 +1360,21 @@ class DelayedMaidsAnalytics:
                 elif filename.endswith('.csv'):
                     self.df = pd.read_csv(io.BytesIO(decoded))
                 else:
-                    raise ValueError("Unsupported file format")
+                    raise ValueError("Unsupported file format. Please upload an Excel (.xlsx) or CSV file.")
                 
                 self.df = self.process_data(self.df)
             except Exception as e:
                 return empty_returns[:-1] + [
-                    dbc.Alert(f"Error processing file: {str(e)}", color="danger", dismissable=True)
+                    dbc.Alert(
+                        f"Error processing data: {str(e)}", 
+                        color="danger", 
+                        dismissable=True
+                    )
                 ]
 
             # Apply filters
             filtered_df = self.df.copy()
             
-            # Basic filters
             if stage_filter:
                 filtered_df = filtered_df[filtered_df['Current Stage'].isin(stage_filter)]
             if type_filter:
@@ -420,7 +1384,7 @@ class DelayedMaidsAnalytics:
             if client_note_filter:
                 filtered_df = filtered_df[filtered_df['Client Note'].isin(client_note_filter)]
                 
-            # Search filter
+            # Enhanced search functionality
             if search_value:
                 search = search_value.lower()
                 filtered_df = filtered_df[
@@ -434,263 +1398,316 @@ class DelayedMaidsAnalytics:
             client_priority_fig = self.create_client_priority_chart(filtered_df)
             priority_stage_fig = self.create_priority_stage_chart(filtered_df)
 
-            # Sort by Time in Stage by default
-            filtered_df = filtered_df.sort_values('Time in Stage', ascending=False)
-            
-            # Additional sorting if specified
+            # Enhanced sorting
             if sort_field:
                 filtered_df = filtered_df.sort_values(sort_field, ascending=False)
             
+            # Prepare table data with formatted values
             table_data = filtered_df.to_dict('records')
             columns = [{'name': i, 'id': i} for i in filtered_df.columns]
 
-            # Create filter options
-            stage_options = [{'label': x, 'value': x} for x in sorted(self.df['Current Stage'].unique())]
-            type_options = [{'label': x, 'value': x} for x in sorted(self.df['Type'].unique())]
-            nationality_options = [{'label': x, 'value': x} for x in sorted(self.df['Nationality'].unique())]
+            # Create filter options with counts
+            def create_options_with_counts(column):
+                value_counts = self.df[column].value_counts()
+                return [{'label': f"{x} ({value_counts[x]})", 'value': x} 
+                    for x in sorted(self.df[column].unique())]
 
-            # Update time
-            update_time = f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            stage_options = create_options_with_counts('Current Stage')
+            type_options = create_options_with_counts('Type')
+            nationality_options = create_options_with_counts('Nationality')
+
+            # Update time with enhanced formatting
+            update_time = html.Span([
+                html.I(className="fas fa-clock me-1"),
+                f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            ])
 
             return (
                 kpi_cards, client_priority_fig, priority_stage_fig,
                 table_data, columns, stage_options, type_options, nationality_options,
                 update_time, None
             )
-
-    def create_kpi_cards(self, df):
-        """Create enhanced KPI cards with key metrics."""
-        total_cases = len(df)
-        if total_cases == 0:  # Handle empty dataframe case
-            return [
-                dbc.Col(
-                    dbc.Card([
-                        dbc.CardBody([
-                            html.H3("0", className="text-primary"),
-                            html.P("Total Delayed Cases", className="mb-1"),
-                            html.Div([
-                                html.I(className="fas fa-users me-2"),
-                                html.Span("0% Critical")
-                            ], className="text-muted small")
-                        ])
-                    ], className="border-start border-primary border-4 shadow-sm h-100")
-                ) for _ in range(4)  # Create 4 empty cards
-            ]
         
-        avg_delay = df['Delay (hours)'].mean()
-        critical_cases = len(df[df['Severity'] == 'Critical'])
-        angry_clients = len(df[df['Client Note'] == 'SUPER_ANGRY_CLIENT'])
-        
-        cards = [
-            dbc.Col(
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H3(f"{total_cases:,}", className="text-primary"),
-                        html.P("Total Delayed Cases", className="mb-1"),
-                        html.Div([
-                            html.I(className="fas fa-users me-2"),
-                            html.Span(f"{(critical_cases/total_cases*100):.1f}% Critical")
-                        ], className="text-muted small")
-                    ])
-                ], className="border-start border-primary border-4 shadow-sm h-100")
-            ),
-            dbc.Col(
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H3(f"{angry_clients:,}", className="text-danger"),
-                        html.P("Super Angry Clients", className="mb-1"),
-                        html.Div([
-                            html.I(className="fas fa-exclamation-circle me-2"),
-                            html.Span(f"{(angry_clients/total_cases*100):.1f}% of Total")
-                        ], className="text-danger small")
-                    ])
-                ], className="border-start border-danger border-4 shadow-sm h-100")
-            ),
-            dbc.Col(
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H3(f"{avg_delay:.1f}", className="text-warning"),
-                        html.P("Average Delay (Hours)", className="mb-1"),
-                        html.Div([
-                            html.I(className="fas fa-clock me-2"),
-                            html.Span("Hours per Case")
-                        ], className="text-warning small")
-                    ])
-                ], className="border-start border-warning border-4 shadow-sm h-100")
-            ),
-            dbc.Col(
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H3(f"{critical_cases:,}", className="text-danger"),
-                        html.P("Critical Cases", className="mb-1"),
-                        html.Div([
-                            html.I(className="fas fa-exclamation-triangle me-2"),
-                            html.Span(f"Exceeded threshold by >200%")
-                        ], className="text-danger small")
-                    ])
-                ], className="border-start border-danger border-4 shadow-sm h-100")
-            )
-        ]
-        return cards
-
-    def create_client_priority_chart(self, df):
-        """Create enhanced client priority distribution chart."""
-        priority_metrics = df.groupby('Client Note').agg({
-            'Delay (hours)': ['mean', 'count', 'sum'],
-            'Priority Score': 'mean'
-        }).reset_index()
-        
-        priority_metrics.columns = ['Client Note', 'Avg Delay', 'Count', 'Total Delay', 'Avg Priority']
-        
-        priority_order = ['SUPER_ANGRY_CLIENT', 'PRIORITIZE_VISA', 'AMNESTY', 'STANDARD']
-        priority_metrics['Client Note'] = pd.Categorical(
-            priority_metrics['Client Note'], 
-            categories=priority_order, 
-            ordered=True
-        )
-        priority_metrics = priority_metrics.sort_values('Client Note')
-        
-        fig = go.Figure()
-        
-        fig.add_trace(go.Bar(
-            name='Average Delay',
-            x=priority_metrics['Client Note'],
-            y=priority_metrics['Avg Delay'],
-            text=priority_metrics['Count'].apply(lambda x: f'Cases: {x}'),
-            textposition='auto',
-            marker_color=['#d32f2f', '#f57c00', '#388e3c', '#1976d2'],
-            hovertemplate=(
-                '<b>%{x}</b><br>' +
-                'Average Delay: %{y:.1f} hours<br>' +
-                '%{text}<br>' +
-                'Total Delay: %{customdata[0]:.0f} hours<br>' +
-                'Avg Priority Score: %{customdata[1]:.0f}<br>' +
-                '<extra></extra>'
-            ),
-            customdata=np.column_stack((
-                priority_metrics['Total Delay'],
-                priority_metrics['Avg Priority']
-            ))
-        ))
-        
-        fig.update_layout(
-            title=None,
-            xaxis_title="Client Priority Level",
-            yaxis_title="Average Delay (hours)",
-            showlegend=False,
-            height=300,
-            margin=dict(l=20, r=20, t=20, b=20)
-        )
-        
-        return fig
-
-    def create_priority_stage_chart(self, df):
-        """Create enhanced priority stage distribution chart showing case counts."""
-        if len(df) == 0:  # Handle empty dataframe case
-            return go.Figure()
-        
-        # Create pivot table with counts instead of delays
-        pivot_data = pd.crosstab(
-            df['Current Stage'],
-            df['Client Note']
-        ).fillna(0)
-        
-        # Sort by total cases
-        total_cases = pivot_data.sum(axis=1)
-        pivot_data = pivot_data.loc[total_cases.sort_values(ascending=True).index]
-        pivot_data = pivot_data.tail(10)  # Show top 10 stages by case count
-        
-        fig = go.Figure()
-        
-        colors = {
-            'SUPER_ANGRY_CLIENT': '#d32f2f',
-            'PRIORITIZE_VISA': '#f57c00',
-            'AMNESTY': '#388e3c',
-            'STANDARD': '#1976d2'
-        }
-        
-        for client_type in pivot_data.columns:
-            fig.add_trace(go.Bar(
-                name=client_type,
-                y=pivot_data.index,
-                x=pivot_data[client_type],
-                orientation='h',
-                marker_color=colors.get(client_type, '#000000'),
-                hovertemplate=(
-                    '<b>%{y}</b><br>' +
-                    f'{client_type}<br>' +
-                    'Number of Cases: %{x}<br>' +
-                    '<extra></extra>'
-                )
-            ))
-        
-        fig.update_layout(
-            title=None,
-            barmode='stack',
-            height=400,
-            margin=dict(l=20, r=20, t=20, b=20),
-            legend_title="Client Priority",
-            xaxis_title="Number of Cases",
-            yaxis={'categoryorder': 'total ascending'},
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
-            ),
-            showlegend=True
-        )
-        
-        fig.update_yaxes(
-            tickfont=dict(size=10),
-            tickangle=0
-        )
-        
-        return fig
 
     def add_custom_css(self):
-        """Add enhanced custom CSS styles."""
+        """Add comprehensive custom CSS styles."""
         custom_css = """
-            .sticky-top {
-                top: 20px;
-                z-index: 1000;
+            /* Core Variables */
+            :root {
+                --primary: #1976d2;
+                --primary-light: #2196f3;
+                --primary-dark: #1565c0;
+                --success: #2e7d32;
+                --warning: #ed6c02;
+                --danger: #d32f2f;
+                --neutral-dark: #2c3e50;
+                --neutral-light: #f8f9fa;
+                --shadow-sm: 0 2px 4px rgba(0,0,0,0.05);
+                --shadow-md: 0 4px 8px rgba(0,0,0,0.1); 
+                --shadow-lg: 0 8px 16px rgba(0,0,0,0.15);
+                --border-radius: 12px;
+                --transition: all 0.3s ease;
             }
-            
+
+            /* Global Styles */
+            body {
+                background-color: var(--neutral-light);
+                color: var(--neutral-dark);
+                font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+            }
+
+            /* Card Styles */
             .card {
+                background: white;
                 border: none;
-                border-radius: 10px;
-                box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.15) !important;
-                margin-bottom: 1.5rem !important;
-                transition: all 0.3s ease-in-out;
+                border-radius: var(--border-radius);
+                box-shadow: var(--shadow-md);
+                transition: var(--transition);
+                overflow: visible;
             }
-            
+
             .card:hover {
-                transform: translateY(-2px);
+                transform: translateY(-4px);
+                box-shadow: var(--shadow-lg);
             }
-            
+
             .card-header {
-                background-color: white;
-                border-bottom: 1px solid rgba(0,0,0,.125);
+                background: linear-gradient(145deg, white 0%, var(--neutral-light) 100%);
+                border-bottom: 1px solid rgba(0,0,0,0.1);
+                padding: 1.25rem;
+            }
+
+            /* Navbar Styles */
+            .navbar {
+                background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+                border-radius: 0 0 var(--border-radius) var(--border-radius);
+                box-shadow: var(--shadow-md);
+            }
+
+            /* Button Styles */
+            .btn {
+                border-radius: 8px;
+                padding: 0.75rem 1.5rem;
+                font-weight: 500;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                transition: var(--transition);
+            }
+
+            .btn-primary {
+                background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+                border: none;
+                box-shadow: 0 4px 6px rgba(33, 150, 243, 0.2);
+            }
+
+            .btn-primary:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 12px rgba(33, 150, 243, 0.3);
+            }
+
+            /* Dropdown Styles */
+            .dropdown-wrapper {
+                position: relative !important;
+                z-index: 1500 !important;
+            }
+
+            .Select-control {
+                border: 2px solid #e0e0e0 !important;
+                border-radius: 8px !important;
+                transition: var(--transition) !important;
+            }
+
+            .Select-control:hover {
+                border-color: var(--primary-light) !important;
+            }
+
+            .Select-menu-outer {
+                border: none !important;
+                border-radius: 8px !important;
+                box-shadow: var(--shadow-lg) !important;
+                z-index: 1600 !important;
+                margin-top: 4px !important;
+            }
+
+            /* Severity Card Styles */
+            .severity-card {
+                background: linear-gradient(145deg, white 0%, var(--neutral-light) 100%);
+            }
+
+            .severity-item {
+                display: flex;
+                align-items: center;
                 padding: 1rem;
+                margin-bottom: 1rem;
+                background: white;
+                border-radius: 8px;
+                transition: var(--transition);
+                box-shadow: var(--shadow-sm);
             }
-            
-            .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td {
-                font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-                font-size: 14px;
-                padding: 8px;
+
+            .severity-item:hover {
+                transform: translateX(8px);
+                box-shadow: var(--shadow-md);
             }
-            
-            .dropdown-container .Select-control {
-                border-radius: 5px;
+
+            .severity-indicator-wrapper {
+                position: relative;
+                width: 40px;
+                height: 40px;
+                margin-right: 1rem;
             }
-            
+
+            .severity-dot {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 12px;
+                height: 12px;
+                border-radius: 50%;
+            }
+
+            .severity-pulse {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 24px;
+                height: 24px;
+                border-radius: 50%;
+                animation: pulse 2s infinite;
+            }
+
+            @keyframes pulse {
+                0% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
+                50% { transform: translate(-50%, -50%) scale(1.5); opacity: 0.2; }
+                100% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
+            }
+
+            .severity-dot.low, .severity-pulse.low {
+                background-color: #4caf50;
+            }
+
+            .severity-dot.medium, .severity-pulse.medium {
+                background-color: #ffc107;
+            }
+
+            .severity-dot.high, .severity-pulse.high {
+                background-color: #ff9800;
+            }
+
+            .severity-dot.critical, .severity-pulse.critical {
+                background-color: #f44336;
+            }
+
+            /* Table Styles */
             .dash-table-container {
-                overflow-x: auto;
+                border-radius: var(--border-radius);
+                overflow: hidden;
+                box-shadow: var(--shadow-md);
             }
-            
-            .dash-filter input {
-                border-radius: 5px;
+
+            .dash-spreadsheet-container .dash-spreadsheet-inner td,
+            .dash-spreadsheet-container .dash-spreadsheet-inner th {
+                padding: 1rem;
+                border: 1px solid #e0e0e0;
+                font-size: 0.9rem;
+            }
+
+            .dash-spreadsheet-container .dash-spreadsheet-inner th {
+                background: linear-gradient(145deg, var(--neutral-light) 0%, #e9ecef 100%);
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+
+            /* Alert Styles */
+            .alert {
+                border-radius: var(--border-radius);
+                border: none;
+                padding: 1rem 1.5rem;
+                box-shadow: var(--shadow-sm);
+            }
+
+            .alert-success {
+                background: linear-gradient(145deg, #e8f5e9 0%, #c8e6c9 100%);
+                color: var(--success);
+            }
+
+            .alert-warning {
+                background: linear-gradient(145deg, #fff3e0 0%, #ffe0b2 100%);
+                color: var(--warning);
+            }
+
+            .alert-danger {
+                background: linear-gradient(145deg, #ffebee 0%, #ffcdd2 100%);
+                color: var(--danger);
+            }
+
+            /* Form Styles */
+            .form-control {
+                border-radius: 8px;
+                padding: 0.75rem 1rem;
+                border: 2px solid #e0e0e0;
+                transition: var(--transition);
+            }
+
+            .form-control:focus {
+                border-color: var(--primary);
+                box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
+            }
+
+            /* Modal Styles */
+            .modal-content {
+                border-radius: var(--border-radius);
+                border: none;
+                box-shadow: var(--shadow-lg);
+            }
+
+            .modal-header {
+                background: linear-gradient(145deg, var(--neutral-light) 0%, #e9ecef 100%);
+                border-radius: calc(var(--border-radius) - 1px) calc(var(--border-radius) - 1px) 0 0;
+                border-bottom: 2px solid #e9ecef;
+            }
+
+            /* KPI Card Styles */
+            .kpi-card {
+                background: linear-gradient(145deg, white 0%, var(--neutral-light) 100%);
+                border-radius: var(--border-radius);
+                padding: 1.5rem;
+                transition: var(--transition);
+            }
+
+            .kpi-card:hover {
+                transform: translateY(-4px);
+            }
+
+            /* Chart Styles */
+            .chart-container {
+                background: white;
+                border-radius: var(--border-radius);
+                padding: 1.5rem;
+                box-shadow: var(--shadow-md);
+                margin-bottom: 1.5rem;
+            }
+
+            /* Status Indicators */
+            .status-indicator {
+                width: 10px;
+                height: 10px;
+                border-radius: 50%;
+                display: inline-block;
+                margin-right: 8px;
+            }
+
+            .status-active {
+                background-color: var(--success);
+                box-shadow: 0 0 0 4px rgba(46, 125, 50, 0.2);
+            }
+
+            .status-inactive {
+                background-color: var(--danger);
+                box-shadow: 0 0 0 4px rgba(211, 47, 47, 0.2);
             }
         """
         self.app.index_string = self.app.index_string.replace(
@@ -713,13 +1730,8 @@ class DelayedMaidsAnalytics:
         """)
         self.app.run_server(debug=debug, port=port, host=host)
 
-
-app = DelayedMaidsAnalytics()
-app.create_layout()
-app.setup_callbacks()
-app.add_custom_css()
-server = app.app.server 
-
+ 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 8000))  
+    app = DelayedMaidsAnalytics()
+    port = int(os.environ.get("PORT", 8050))
     app.run_server(host='0.0.0.0', port=port)
