@@ -286,6 +286,7 @@ class DelayedMaidsAnalytics:
             title="Delayed Cases Analytics",
             prevent_initial_callbacks='initial_duplicate'  # Add this line
         )
+        self.server = self.app.server 
         self.df = pd.DataFrame()
         self.user_manager = UserManager()
         
