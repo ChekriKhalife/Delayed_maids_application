@@ -1739,10 +1739,14 @@ class DelayedMaidsAnalytics:
         self.app.run_server(debug=debug, port=port, host=host)
 
 if __name__ == "__main__":
-    app = DelayedMaidsAnalytics()
-    app.run_server(debug=True, port=8050, host="0.0.0.0")
-else:
-    # Expose the server instance for Gunicorn
     analytics_app = DelayedMaidsAnalytics()
+    analytics_app.create_layout()  # Explicitly create layout here
+    analytics_app.setup_callbacks()  # Setup callbacks before starting
+    server = analytics_app.app.server  # Expose Flask server for Gunicorn
+    analytics_app.run_server(debug=True, port=8050, host="0.0.0.0")
+else:
+    analytics_app = DelayedMaidsAnalytics()
+    analytics_app.create_layout()
+    analytics_app.setup_callbacks()
     server = analytics_app.app.server
 
