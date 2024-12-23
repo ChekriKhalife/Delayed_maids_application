@@ -134,9 +134,16 @@ class UserManager:
                 'https://www.googleapis.com/auth/drive']
         
         # Add your credentials file path
-        creds = ServiceAccountCredentials.from_json_keyfile_name(
-            'service_account_key.json', scope)
+        # Load credentials from environment variable
+        service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+        if not service_account_json:
+            raise ValueError("Environment variable GOOGLE_SERVICE_ACCOUNT_JSON is missing")
+        
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(
+            json.loads(service_account_json), scope
+        )
         self.client = gspread.authorize(creds)
+
 
     def add_user(self, username: str, name: str, sheet_id: str) -> bool:
         """Add a new user"""
