@@ -188,67 +188,157 @@ class UserManager:
             print(f"Error deleting user: {str(e)}")
             return False
     def distribute_data(self, usernames: list, data: pd.DataFrame) -> dict:
-        """Distribute data evenly among users"""
-        if not usernames or data.empty:
-            return {"error": "No users selected or no data to distribute"}
+    """
+    Distribute data evenly among users with enhanced error handling and debugging
+    
+    Returns:
+        dict: Detailed results for each user including success/failure status and debugging info
+    """
+    results = {}
+    debug_info = {}
+    
+    try:
+        # Input validation with detailed error messages
+        if not usernames:
+            return {
+                "error": "No users selected",
+                "debug": "The usernames list is empty"
+            }
+        
+        if data.empty:
+            return {
+                "error": "No data to distribute",
+                "debug": "The input DataFrame is empty"
+            }
+            
+        # Reset workload counters
+        for user in self.users.values():
+            user.workload = 0
 
-        results = {}
-        try:
-            # Reset workload counters
-            for user in self.users.values():
-                user.workload = 0
+        # Calculate distribution metrics
+        total_records = len(data)
+        base_records_per_user = total_records // len(usernames)
+        extra_records = total_records % len(usernames)
+        
+        debug_info["distribution_plan"] = {
+            "total_records": total_records,
+            "base_records_per_user": base_records_per_user,
+            "extra_records": extra_records,
+            "users_count": len(usernames)
+        }
 
-            # Calculate number of records per user
-            total_records = len(data)
-            base_records_per_user = total_records // len(usernames)
-            extra_records = total_records % len(usernames)
+        start_idx = 0
+        for username in usernames:
+            user_debug = {
+                "username": username,
+                "steps": []
+            }
+            
+            # Validate user existence
+            if username not in self.users:
+                results[username] = {
+                    "status": "error",
+                    "message": "User not found in system",
+                    "debug": f"Username '{username}' not found in self.users dictionary"
+                }
+                continue
 
-            start_idx = 0
-            for username in usernames:
-                if username not in self.users:
-                    results[username] = "User not found"
-                    continue
+            # Calculate records for this user
+            records_for_user = base_records_per_user
+            if extra_records > 0:
+                records_for_user += 1
+                extra_records -= 1
 
-                # Calculate records for this user
-                records_for_user = base_records_per_user
-                if extra_records > 0:
-                    records_for_user += 1
-                    extra_records -= 1
+            end_idx = start_idx + records_for_user
+            user_data = data.iloc[start_idx:end_idx]
+            start_idx = end_idx
+            
+            user_debug["steps"].append({
+                "step": "data_slice",
+                "start_idx": start_idx,
+                "end_idx": end_idx,
+                "records_assigned": len(user_data)
+            })
 
-                end_idx = start_idx + records_for_user
-                user_data = data.iloc[start_idx:end_idx]
-                start_idx = end_idx
-
-                # Update the user's Google Sheet
-                try:
-                    sheet = self.client.open_by_key(self.users[username].google_sheet_id).sheet1
-                    sheet.clear()
+            # Update the user's Google Sheet
+            try:
+                # Access sheet
+                sheet = self.client.open_by_key(self.users[username].google_sheet_id).sheet1
+                user_debug["steps"].append({
+                    "step": "sheet_access",
+                    "sheet_id": self.users[username].google_sheet_id,
+                    "status": "success"
+                })
+                
+                # Clear sheet
+                sheet.clear()
+                user_debug["steps"].append({
+                    "step": "sheet_clear",
+                    "status": "success"
+                })
+                
+                if not user_data.empty:
+                    # Update headers
+                    headers = user_data.columns.tolist()
+                    sheet.update('A1', [headers])
+                    user_debug["steps"].append({
+                        "step": "headers_update",
+                        "headers_count": len(headers),
+                        "status": "success"
+                    })
                     
-                    if not user_data.empty:
-                        # Update headers
-                        headers = user_data.columns.tolist()
-                        sheet.update('A1', [headers])
-                        
-                        # Update data
-                        values = user_data.values.tolist()
-                        if values:
-                            sheet.update('A2', values)
-                        
-                        # Update workload counter
-                        self.users[username].workload = len(values)
-                        results[username] = f"Successfully assigned {len(values)} tasks"
-                    else:
-                        results[username] = "No tasks assigned"
+                    # Update data
+                    values = user_data.values.tolist()
+                    if values:
+                        sheet.update('A2', values)
+                        user_debug["steps"].append({
+                            "step": "data_update",
+                            "rows_updated": len(values),
+                            "status": "success"
+                        })
+                    
+                    # Update workload counter
+                    self.users[username].workload = len(values)
+                    
+                    results[username] = {
+                        "status": "success",
+                        "message": f"Successfully assigned {len(values)} tasks",
+                        "debug": user_debug
+                    }
+                else:
+                    results[username] = {
+                        "status": "warning",
+                        "message": "No tasks assigned",
+                        "debug": user_debug
+                    }
 
-                except Exception as e:
-                    results[username] = f"Error: {str(e)}"
+            except Exception as e:
+                error_details = str(e)
+                user_debug["steps"].append({
+                    "step": "error",
+                    "error_message": error_details,
+                    "error_type": type(e).__name__
+                })
+                
+                results[username] = {
+                    "status": "error",
+                    "message": f"Failed to update sheet: {error_details}",
+                    "debug": user_debug
+                }
 
-            self._save_user_config()  # Save updated workload info
-            return results
+        self._save_user_config()  # Save updated workload info
+        debug_info["final_results"] = results
+        return results
 
-        except Exception as e:
-            return {"error": f"Distribution failed: {str(e)}"}
-
+    except Exception as e:
+        return {
+            "error": f"Distribution failed: {str(e)}",
+            "debug": {
+                "error_type": type(e).__name__,
+                "error_details": str(e),
+                "traceback": traceback.format_exc()
+            }
+        }
     def _save_user_config(self):
         """Save user configuration to a JSON file"""
         config = {
@@ -1301,57 +1391,86 @@ class DelayedMaidsAnalytics:
             # Handle distribution button click
             if trigger_id == 'distribute-btn':
                 if not selected_users or not table_data:
-                    return dash.no_update, dash.no_update, dash.no_update, \
-                        dash.no_update, dash.no_update, dash.no_update, \
-                        dash.no_update, dash.no_update, dash.no_update, \
+                    return dash.no_update * 9 + (
                         dbc.Alert("Please select users and ensure there is data to distribute",
-                                color="warning", dismissable=True)
+                                color="warning", dismissable=True),
+                    )
                 
                 try:
                     df = pd.DataFrame(table_data)
                     results = self.user_manager.distribute_data(selected_users, df)
                     
-                    # Create summary of distribution results
-                    success_count = sum(1 for result in results.values() if result == "Success")
+                    # Process detailed results
+                    success_count = sum(1 for r in results.values() 
+                                      if isinstance(r, dict) and r.get("status") == "success")
+                    error_count = sum(1 for r in results.values() 
+                                     if isinstance(r, dict) and r.get("status") == "error")
+                    warning_count = sum(1 for r in results.values() 
+                                      if isinstance(r, dict) and r.get("status") == "warning")
                     
-                    if success_count == len(results):
-                        alert = dbc.Alert(
-                            f"Tasks successfully distributed to {success_count} users",
-                            color="success",
-                            dismissable=True,
-                            duration=4000
-                        )
-                    elif success_count > 0:
-                        alert = dbc.Alert(
-                            [
-                                f"Tasks distributed to {success_count}/{len(results)} users. ",
-                                html.Br(),
-                                "Errors: ",
-                                html.Br(),
-                                *[f"{user}: {msg}" for user, msg in results.items() if msg != "Success"]
-                            ],
-                            color="warning",
-                            dismissable=True
-                        )
-                    else:
-                        alert = dbc.Alert(
-                            ["Failed to distribute tasks: ",
+                    alert_content = []
+                    
+                    # Summary section
+                    summary = [
+                        html.H5("Distribution Results", className="mb-3"),
+                        html.P([
+                            f"Successfully distributed to {success_count} users",
                             html.Br(),
-                            *[f"{user}: {msg}" for user, msg in results.items()]],
-                            color="danger",
-                            dismissable=True
-                        )
+                            f"Errors: {error_count}",
+                            html.Br(),
+                            f"Warnings: {warning_count}"
+                        ], className="mb-3")
+                    ]
+                    alert_content.extend(summary)
                     
-                    return dash.no_update, dash.no_update, dash.no_update, \
-                        dash.no_update, dash.no_update, dash.no_update, \
-                        dash.no_update, dash.no_update, dash.no_update, alert
+                    # Detailed results section
+                    if error_count > 0 or warning_count > 0:
+                        alert_content.append(html.H6("Detailed Results:", className="mb-2"))
+                        for username, result in results.items():
+                            if isinstance(result, dict):
+                                if result["status"] in ["error", "warning"]:
+                                    alert_content.extend([
+                                        html.Div([
+                                            html.Strong(f"{username}: "),
+                                            result["message"],
+                                            # Add debugging info if available
+                                            html.Details([
+                                                html.Summary("Debug Info"),
+                                                html.Pre(json.dumps(result["debug"], indent=2))
+                                            ]) if "debug" in result else None
+                                        ], className="mb-2")
+                                    ])
                     
+                    # Determine alert color based on results
+                    if error_count > 0:
+                        alert_color = "danger"
+                    elif warning_count > 0:
+                        alert_color = "warning"
+                    else:
+                        alert_color = "success"
+                    
+                    alert = dbc.Alert(
+                        alert_content,
+                        color=alert_color,
+                        dismissable=True
+                    )
+                    
+                    return dash.no_update * 9 + (alert,)
+                                
                 except Exception as e:
-                    return dash.no_update, dash.no_update, dash.no_update, \
-                        dash.no_update, dash.no_update, dash.no_update, \
-                        dash.no_update, dash.no_update, dash.no_update, \
-                        dbc.Alert(f"Error: {str(e)}", color="danger", dismissable=True)
-            
+                    error_alert = dbc.Alert(
+                        [
+                            html.H5("Distribution Error", className="mb-3"),
+                            html.P(str(e)),
+                            html.Details([
+                                html.Summary("Debug Info"),
+                                html.Pre(traceback.format_exc())
+                            ])
+                        ],
+                        color="danger",
+                        dismissable=True
+                    )
+                    return dash.no_update * 9 + (error_alert,)
             # Handle data upload and filtering (existing functionality)
             empty_returns = [[], {}, {}, [], [], [], [], [], "", None]
             
