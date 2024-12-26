@@ -16,7 +16,7 @@ from typing import Dict, Optional
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import json
-
+import traceback
 # Constants remain the same
 TASK_THRESHOLDS = {
     'Apply for Work Permit - Stage 1': 168,
