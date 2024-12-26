@@ -188,157 +188,157 @@ class UserManager:
             print(f"Error deleting user: {str(e)}")
             return False
     def distribute_data(self, usernames: list, data: pd.DataFrame) -> dict:
-    """
-    Distribute data evenly among users with enhanced error handling and debugging
-    
-    Returns:
-        dict: Detailed results for each user including success/failure status and debugging info
-    """
-    results = {}
-    debug_info = {}
-    
-    try:
-        # Input validation with detailed error messages
-        if not usernames:
-            return {
-                "error": "No users selected",
-                "debug": "The usernames list is empty"
-            }
+        """
+        Distribute data evenly among users with enhanced error handling and debugging
         
-        if data.empty:
-            return {
-                "error": "No data to distribute",
-                "debug": "The input DataFrame is empty"
-            }
-            
-        # Reset workload counters
-        for user in self.users.values():
-            user.workload = 0
-
-        # Calculate distribution metrics
-        total_records = len(data)
-        base_records_per_user = total_records // len(usernames)
-        extra_records = total_records % len(usernames)
+        Returns:
+            dict: Detailed results for each user including success/failure status and debugging info
+        """
+        results = {}
+        debug_info = {}
         
-        debug_info["distribution_plan"] = {
-            "total_records": total_records,
-            "base_records_per_user": base_records_per_user,
-            "extra_records": extra_records,
-            "users_count": len(usernames)
-        }
-
-        start_idx = 0
-        for username in usernames:
-            user_debug = {
-                "username": username,
-                "steps": []
-            }
-            
-            # Validate user existence
-            if username not in self.users:
-                results[username] = {
-                    "status": "error",
-                    "message": "User not found in system",
-                    "debug": f"Username '{username}' not found in self.users dictionary"
+        try:
+            # Input validation with detailed error messages
+            if not usernames:
+                return {
+                    "error": "No users selected",
+                    "debug": "The usernames list is empty"
                 }
-                continue
-
-            # Calculate records for this user
-            records_for_user = base_records_per_user
-            if extra_records > 0:
-                records_for_user += 1
-                extra_records -= 1
-
-            end_idx = start_idx + records_for_user
-            user_data = data.iloc[start_idx:end_idx]
-            start_idx = end_idx
             
-            user_debug["steps"].append({
-                "step": "data_slice",
-                "start_idx": start_idx,
-                "end_idx": end_idx,
-                "records_assigned": len(user_data)
-            })
+            if data.empty:
+                return {
+                    "error": "No data to distribute",
+                    "debug": "The input DataFrame is empty"
+                }
+                
+            # Reset workload counters
+            for user in self.users.values():
+                user.workload = 0
 
-            # Update the user's Google Sheet
-            try:
-                # Access sheet
-                sheet = self.client.open_by_key(self.users[username].google_sheet_id).sheet1
-                user_debug["steps"].append({
-                    "step": "sheet_access",
-                    "sheet_id": self.users[username].google_sheet_id,
-                    "status": "success"
-                })
+            # Calculate distribution metrics
+            total_records = len(data)
+            base_records_per_user = total_records // len(usernames)
+            extra_records = total_records % len(usernames)
+            
+            debug_info["distribution_plan"] = {
+                "total_records": total_records,
+                "base_records_per_user": base_records_per_user,
+                "extra_records": extra_records,
+                "users_count": len(usernames)
+            }
+
+            start_idx = 0
+            for username in usernames:
+                user_debug = {
+                    "username": username,
+                    "steps": []
+                }
                 
-                # Clear sheet
-                sheet.clear()
-                user_debug["steps"].append({
-                    "step": "sheet_clear",
-                    "status": "success"
-                })
+                # Validate user existence
+                if username not in self.users:
+                    results[username] = {
+                        "status": "error",
+                        "message": "User not found in system",
+                        "debug": f"Username '{username}' not found in self.users dictionary"
+                    }
+                    continue
+
+                # Calculate records for this user
+                records_for_user = base_records_per_user
+                if extra_records > 0:
+                    records_for_user += 1
+                    extra_records -= 1
+
+                end_idx = start_idx + records_for_user
+                user_data = data.iloc[start_idx:end_idx]
+                start_idx = end_idx
                 
-                if not user_data.empty:
-                    # Update headers
-                    headers = user_data.columns.tolist()
-                    sheet.update('A1', [headers])
+                user_debug["steps"].append({
+                    "step": "data_slice",
+                    "start_idx": start_idx,
+                    "end_idx": end_idx,
+                    "records_assigned": len(user_data)
+                })
+
+                # Update the user's Google Sheet
+                try:
+                    # Access sheet
+                    sheet = self.client.open_by_key(self.users[username].google_sheet_id).sheet1
                     user_debug["steps"].append({
-                        "step": "headers_update",
-                        "headers_count": len(headers),
+                        "step": "sheet_access",
+                        "sheet_id": self.users[username].google_sheet_id,
                         "status": "success"
                     })
                     
-                    # Update data
-                    values = user_data.values.tolist()
-                    if values:
-                        sheet.update('A2', values)
+                    # Clear sheet
+                    sheet.clear()
+                    user_debug["steps"].append({
+                        "step": "sheet_clear",
+                        "status": "success"
+                    })
+                    
+                    if not user_data.empty:
+                        # Update headers
+                        headers = user_data.columns.tolist()
+                        sheet.update('A1', [headers])
                         user_debug["steps"].append({
-                            "step": "data_update",
-                            "rows_updated": len(values),
+                            "step": "headers_update",
+                            "headers_count": len(headers),
                             "status": "success"
                         })
-                    
-                    # Update workload counter
-                    self.users[username].workload = len(values)
+                        
+                        # Update data
+                        values = user_data.values.tolist()
+                        if values:
+                            sheet.update('A2', values)
+                            user_debug["steps"].append({
+                                "step": "data_update",
+                                "rows_updated": len(values),
+                                "status": "success"
+                            })
+                        
+                        # Update workload counter
+                        self.users[username].workload = len(values)
+                        
+                        results[username] = {
+                            "status": "success",
+                            "message": f"Successfully assigned {len(values)} tasks",
+                            "debug": user_debug
+                        }
+                    else:
+                        results[username] = {
+                            "status": "warning",
+                            "message": "No tasks assigned",
+                            "debug": user_debug
+                        }
+
+                except Exception as e:
+                    error_details = str(e)
+                    user_debug["steps"].append({
+                        "step": "error",
+                        "error_message": error_details,
+                        "error_type": type(e).__name__
+                    })
                     
                     results[username] = {
-                        "status": "success",
-                        "message": f"Successfully assigned {len(values)} tasks",
-                        "debug": user_debug
-                    }
-                else:
-                    results[username] = {
-                        "status": "warning",
-                        "message": "No tasks assigned",
+                        "status": "error",
+                        "message": f"Failed to update sheet: {error_details}",
                         "debug": user_debug
                     }
 
-            except Exception as e:
-                error_details = str(e)
-                user_debug["steps"].append({
-                    "step": "error",
-                    "error_message": error_details,
-                    "error_type": type(e).__name__
-                })
-                
-                results[username] = {
-                    "status": "error",
-                    "message": f"Failed to update sheet: {error_details}",
-                    "debug": user_debug
+            self._save_user_config()  # Save updated workload info
+            debug_info["final_results"] = results
+            return results
+
+        except Exception as e:
+            return {
+                "error": f"Distribution failed: {str(e)}",
+                "debug": {
+                    "error_type": type(e).__name__,
+                    "error_details": str(e),
+                    "traceback": traceback.format_exc()
                 }
-
-        self._save_user_config()  # Save updated workload info
-        debug_info["final_results"] = results
-        return results
-
-    except Exception as e:
-        return {
-            "error": f"Distribution failed: {str(e)}",
-            "debug": {
-                "error_type": type(e).__name__,
-                "error_details": str(e),
-                "traceback": traceback.format_exc()
             }
-        }
     def _save_user_config(self):
         """Save user configuration to a JSON file"""
         config = {
