@@ -18,30 +18,28 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 import traceback
 # Constants remain the same
-TASK_THRESHOLDS = {
-    'Apply for Work Permit - Stage 1': 168,
-    'Pay MOHRE Insurance': 24,
-    'Pay Work Permit Fees - Stage 2': 24,
-    'Check Work Permit Approval - Stage 1': 48,
-    'Check Work Permit Approval - Stage 2': 24,
-    'Fix Work Permit Issues - Stage -1': 24,
-    'Fix work permit issues - stage 2': 24,
-    'Apply for entry Visa': 24,
-    'Check Entry Visa Immigration Approval': 24,
-    'Change of Status': 24,
-    'Upload Change of status': 24,
-    'Prepare EID application (Receival Automated)': 96,
-    'Approve signed Offer Letter': 24,
-    'Apply for R-visa': 24,
-    'Upload The e-Residency': 24,
-    'Check ID application type': 24,
-    'Modify eid application': 240,
-    'Prepare EID Application for Modification': 48,
-    'Prepare medical application': 48,
-    'Prepare folder containing E-visa medical application and EID': 72,
-    'Receival of EID Card': 168
-}
+CURRENT_STAGES = [
+    'Prepare EID application', 'Waiting for the maid to go to medical test and EID fingerprinting',
+    'Check tasheel contract approval', 'Insert Labour Card Expiry Date', 
+    'Pending medical certificate approval from DHA', 'Receive of Health Insurance Card', 
+    'Receival of EID Card', 'MissingDocuments', 'Pause e-visa application', 
+    'Submit Nawakes in Tasheel', 'Check Work Permit Ministry Approval', 'E-visa Issue solved', 
+    'Fix the problem of entry visa', 'Awaiting to receive flight ticket schedule', 
+    'Fix work permit issues', 'Apply for R-visa', 'Pay Challenge overstay fines application fees', 
+    'Modify EID Application', 'Refund Entry Visa Application', 'Check Entry Visa Immigration Approval', 
+    'Waiting for reply of Ansari', 'Pending to cancel active visa', 'Pending to fix MOHRE issue', 
+    'Prepare medical application', 'Pending maid to go for EID Biometrics', 'Prepare insurance application', 
+    'Upload Contract to Tasheel', 'Pending offer letter to be signed', 
+    'prepare_eid_application_for_modification', 'Apply for Ansari', 'ChangeofStatus', 
+    'Get Form from GDRFA', 'Pending to remove absconding', 'Create Regular Offer Letter', 
+    'Modify Offer Letter', 'Prepare folder containing E-visa medical application and EID', 
+    'Check Labour Card Approval', 'Repeat Medical', 'Waiting for the PRO Update', 
+    'Waiting for Personal Photo', 'Check ID application type', 
+    'Getting the Confirmation to Proceed with Change of Status', 'Apply for entry Visa', 
+    'Upload Change of status', 'Approve signed Offer Letter', 'Upload tasheel contract to ERP'
+]
 
+TASK_THRESHOLDS = {stage: 24 for stage in CURRENT_STAGES}
 @dataclass
 class User:
     name: str
@@ -678,7 +676,10 @@ class DelayedMaidsAnalytics:
             # Calculate delays and severity
             df['Threshold (in hours)'] = df['Current Stage'].map(TASK_THRESHOLDS).fillna(24)
             df['Delay (hours)'] = (df['Time In Stage'] - df['Threshold (in hours)']).fillna(0)
+            df = df[df['Delay (hours)'] > 0]
             
+            
+                        
             df['Threshold Ratio'] = df['Time In Stage'] / df['Threshold (in hours)']
             df['Severity'] = pd.cut(
                 df['Threshold Ratio'],
@@ -894,6 +895,14 @@ class DelayedMaidsAnalytics:
                         ])
                     ])
                 ], className="mb-4 shadow-sm"),
+                dbc.Row([
+                dbc.Col([
+                    html.Label("Set Threshold for a Stage"),
+                    dcc.Input(id='threshold-input', type='text', 
+                              placeholder='e.g., Stage Name,48', debounce=True),
+                    dbc.Button("Update Threshold", id='update-threshold-btn', color='primary', className="mt-2")
+                ], width=6)
+            ], className="mb-3"),
 
                 dbc.Card([
                     dbc.CardHeader([
@@ -1146,6 +1155,25 @@ class DelayedMaidsAnalytics:
 
     def setup_callbacks(self):
         """Set up enhanced callbacks with new filter functionality."""
+        @app.callback(
+            Output('alerts-area', 'children'),
+            Input('update-threshold-btn', 'n_clicks'),
+            State('threshold-input', 'value')
+        )
+        def update_threshold(n_clicks, input_value):
+            if not n_clicks or not input_value:
+                return dash.no_update
+        
+            try:
+                stage, threshold = input_value.split(',')
+                threshold = float(threshold)
+                if stage in TASK_THRESHOLDS:
+                    TASK_THRESHOLDS[stage] = threshold
+                    return dbc.Alert(f"Updated threshold for '{stage}' to {threshold} hours", color="success")
+                else:
+                    return dbc.Alert(f"Stage '{stage}' not found", color="danger")
+            except Exception as e:
+                return dbc.Alert(f"Error: {str(e)}", color="danger")
 
         # Callback for opening/closing the modal
         @self.app.callback(
@@ -1500,7 +1528,7 @@ class DelayedMaidsAnalytics:
                 ]
 
             # Apply filters
-            filtered_df = self.df.copy()
+            filtered_df = self.df[self.df['Delay (hours)'] > 0].copy()
             
             if stage_filter:
                 filtered_df = filtered_df[filtered_df['Current Stage'].isin(stage_filter)]
