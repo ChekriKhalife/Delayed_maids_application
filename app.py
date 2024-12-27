@@ -175,8 +175,7 @@ class UserManager:
             )
         }
         self.setup_google_sheets()
-        # Load any saved thresholds
-        self.load_thresholds()
+        self._load_user_config() 
     
     
     def validate_sheet_access(self, sheet_id):
