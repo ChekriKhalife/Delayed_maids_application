@@ -78,7 +78,6 @@ def load_thresholds():
         return default_thresholds
 
 TASK_THRESHOLDS = load_thresholds()
-
 @dataclass
 class User:
     name: str
@@ -454,7 +453,6 @@ class DelayedMaidsAnalytics:
                 ])
             )
         return input_groups
-        
     def create_kpi_cards(self, df):
         """Create KPI cards with metrics."""
         total_cases = len(df)
@@ -962,7 +960,43 @@ class DelayedMaidsAnalytics:
                         ])
                     ])
                 ], className="mb-4 shadow-sm"),
-
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.H5([
+                            html.I(className="fas fa-clock me-2"),
+                            "Stage Thresholds Management"
+                        ]),
+                    ]),
+                    dbc.CardBody([
+                        dbc.Alert([
+                            html.I(className="fas fa-info-circle me-2"),
+                            "Set custom thresholds for each stage (in hours). Default is 24 hours."
+                        ], color="info", className="mb-3"),
+                        html.Div([
+                            dbc.Row([
+                                dbc.Col([
+                                    html.Div(id='threshold-inputs')
+                                ], width=12)
+                            ]),
+                            dbc.Row([
+                                dbc.Col([
+                                    dbc.Button(
+                                        ["Save Thresholds ", html.I(className="fas fa-save ms-1")],
+                                        id="save-thresholds-btn",
+                                        color="primary",
+                                        className="mt-3"
+                                    ),
+                                    dbc.Button(
+                                        ["Reset to Default ", html.I(className="fas fa-undo ms-1")],
+                                        id="reset-thresholds-btn",
+                                        color="secondary",
+                                        className="mt-3 ms-2"
+                                    )
+                                ], width=12)
+                            ])
+                        ])
+                    ])
+                ], className="mb-4 shadow-sm"),
                 dbc.Card([
                     dbc.CardHeader([
                         html.H5([
@@ -1003,43 +1037,6 @@ class DelayedMaidsAnalytics:
                         ])
                     ])
                 ], className="mb-4 shadow-sm"),
-                dbc.Card([
-                dbc.CardHeader([
-                    html.H5([
-                        html.I(className="fas fa-clock me-2"),
-                        "Stage Thresholds Management"
-                    ]),
-                ]),
-                dbc.CardBody([
-                    dbc.Alert([
-                        html.I(className="fas fa-info-circle me-2"),
-                        "Set custom thresholds for each stage (in hours). Default is 24 hours."
-                    ], color="info", className="mb-3"),
-                    html.Div([
-                        dbc.Row([
-                            dbc.Col([
-                                html.Div(id='threshold-inputs')
-                            ], width=12)
-                        ]),
-                        dbc.Row([
-                            dbc.Col([
-                                dbc.Button(
-                                    ["Save Thresholds ", html.I(className="fas fa-save ms-1")],
-                                    id="save-thresholds-btn",
-                                    color="primary",
-                                    className="mt-3"
-                                ),
-                                dbc.Button(
-                                    ["Reset to Default ", html.I(className="fas fa-undo ms-1")],
-                                    id="reset-thresholds-btn",
-                                    color="secondary",
-                                    className="mt-3 ms-2"
-                                )
-                            ], width=12)
-                        ])
-                    ])
-                ])
-            ], className="mb-4 shadow-sm"),
                 # Enhanced Severity Legend with Icons
                 dbc.Card([
                     dbc.CardBody([
@@ -1251,93 +1248,93 @@ class DelayedMaidsAnalytics:
 
     def setup_callbacks(self):
         """Set up enhanced callbacks with new filter functionality."""
-        # Callback for opening/closing the modal
-    @self.app.callback(
-        Output('threshold-inputs', 'children'),
-        [Input('upload-data', 'contents')],
-        [State('upload-data', 'filename')]
-    )
-    def update_threshold_inputs(contents, filename):
-        """Update threshold input fields when new data is uploaded."""
-        if contents is None:
-            return []
-        
-        try:
-            if not hasattr(self, 'df') or self.df.empty:
+        @self.app.callback(
+            Output('threshold-inputs', 'children'),
+            [Input('upload-data', 'contents')],
+            [State('upload-data', 'filename')]
+        )
+        def update_threshold_inputs(contents, filename):
+            """Update threshold input fields when new data is uploaded."""
+            if contents is None:
                 return []
             
-            stages = self.df['Current Stage'].unique()
-            return self.create_threshold_inputs(stages)
-        except Exception as e:
-            print(f"Error updating threshold inputs: {str(e)}")
-            return []
-    
-    @self.app.callback(
-        [Output('alerts-area', 'children'),
-         Output({'type': 'threshold-input', 'stage': dash.ALL}, 'value')],
-        [Input('save-thresholds-btn', 'n_clicks'),
-         Input('reset-thresholds-btn', 'n_clicks')],
-        [State({'type': 'threshold-input', 'stage': dash.ALL}, 'id'),
-         State({'type': 'threshold-input', 'stage': dash.ALL}, 'value')]
-    )
-    def manage_thresholds(save_clicks, reset_clicks, input_ids, input_values):
-        """Handle saving and resetting thresholds."""
-        ctx = dash.callback_context
-        if not ctx.triggered:
-            return dash.no_update, dash.no_update
-    
-        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-        
-        try:
-            if trigger_id == 'save-thresholds-btn':
-                # Create new thresholds dictionary
-                new_thresholds = {
-                    input_id['stage']: float(value)
-                    for input_id, value in zip(input_ids, input_values)
-                }
-                self.save_thresholds(new_thresholds)
+            try:
+                if not hasattr(self, 'df') or self.df.empty:
+                    return []
+                
+                stages = self.df['Current Stage'].unique()
+                return self.create_threshold_inputs(stages)
+            except Exception as e:
+                print(f"Error updating threshold inputs: {str(e)}")
+                return []
+
+        @self.app.callback(
+            [Output('alerts-area', 'children'),
+            Output({'type': 'threshold-input', 'stage': dash.ALL}, 'value')],
+            [Input('save-thresholds-btn', 'n_clicks'),
+            Input('reset-thresholds-btn', 'n_clicks')],
+            [State({'type': 'threshold-input', 'stage': dash.ALL}, 'id'),
+            State({'type': 'threshold-input', 'stage': dash.ALL}, 'value')]
+        )
+        def manage_thresholds(save_clicks, reset_clicks, input_ids, input_values):
+            """Handle saving and resetting thresholds."""
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                return dash.no_update, dash.no_update
+
+            trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            
+            try:
+                if trigger_id == 'save-thresholds-btn':
+                    # Create new thresholds dictionary
+                    new_thresholds = {
+                        input_id['stage']: float(value)
+                        for input_id, value in zip(input_ids, input_values)
+                    }
+                    self.save_thresholds(new_thresholds)
+                    return (
+                        dbc.Alert(
+                            "Thresholds saved successfully!",
+                            color="success",
+                            dismissable=True,
+                            duration=4000
+                        ),
+                        dash.no_update
+                    )
+                
+                elif trigger_id == 'reset-thresholds-btn':
+                    # Reset to default 24 hours
+                    default_values = [24] * len(input_ids)
+                    default_thresholds = {
+                        input_id['stage']: 24
+                        for input_id in input_ids
+                    }
+                    self.save_thresholds(default_thresholds)
+                    return (
+                        dbc.Alert(
+                            "Thresholds reset to default (24 hours).",
+                            color="info",
+                            dismissable=True,
+                            duration=4000
+                        ),
+                        default_values
+                    )
+                    
+            except Exception as e:
                 return (
                     dbc.Alert(
-                        "Thresholds saved successfully!",
-                        color="success",
-                        dismissable=True,
-                        duration=4000
+                        f"Error managing thresholds: {str(e)}",
+                        color="danger",
+                        dismissable=True
                     ),
                     dash.no_update
                 )
-            
-            elif trigger_id == 'reset-thresholds-btn':
-                # Reset to default 24 hours
-                default_values = [24] * len(input_ids)
-                default_thresholds = {
-                    input_id['stage']: 24
-                    for input_id in input_ids
-                }
-                self.save_thresholds(default_thresholds)
-                return (
-                    dbc.Alert(
-                        "Thresholds reset to default (24 hours).",
-                        color="info",
-                        dismissable=True,
-                        duration=4000
-                    ),
-                    default_values
-                )
-                
-        except Exception as e:
-            return (
-                dbc.Alert(
-                    f"Error managing thresholds: {str(e)}",
-                    color="danger",
-                    dismissable=True
-                ),
-                dash.no_update
-            )
+        # Callback for opening/closing the modal
         @self.app.callback(
             Output("user-management-modal", "is_open"),
             [Input("open-user-modal", "n_clicks")],
             [State("user-management-modal", "is_open")],
-            prevent_initial_call=True  
+            prevent_initial_call=True  # Add this line
         )
         def toggle_modal(n1, is_open):
             if n1:
@@ -1760,15 +1757,7 @@ class DelayedMaidsAnalytics:
                 --border-radius: 12px;
                 --transition: all 0.3s ease;
             }
-            .threshold-input {
-                    width: 100px !important;
-                }
-                
-                .threshold-label {
-                    font-size: 0.9rem;
-                    color: #666;
-                    margin-bottom: 0.25rem;
-                }
+
             /* Global Styles */
             body {
                 background-color: var(--neutral-light);
@@ -1840,7 +1829,15 @@ class DelayedMaidsAnalytics:
             .Select-control:hover {
                 border-color: var(--primary-light) !important;
             }
+            .threshold-input {
+                width: 100px !important;
+            }
 
+            .threshold-label {
+                font-size: 0.9rem;
+                color: #666;
+                margin-bottom: 0.25rem;
+            }
             .Select-menu-outer {
                 border: none !important;
                 border-radius: 8px !important;
@@ -2061,4 +2058,3 @@ else:
     analytics_app.create_layout()
     analytics_app.setup_callbacks()
     server = analytics_app.app.server
-    
