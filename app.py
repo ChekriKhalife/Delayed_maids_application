@@ -1670,229 +1670,98 @@ class DelayedMaidsAnalytics:
 
         # Your existing update_dashboard callback
         @self.app.callback(
-            [
-                Output('kpi-cards', 'children'),
-                Output('client-priority-chart', 'figure'),
-                Output('priority-stage-chart', 'figure'),
-                Output('detailed-table', 'data'),
-                Output('detailed-table', 'columns'),
-                Output('stage-filter', 'options'),
-                Output('type-filter', 'options'),
-                Output('nationality-filter', 'options'),
-                Output('last-update', 'children'),
-                Output('alerts-area', 'children')
-            ],
-            [
-                Input('upload-data', 'contents'),
-                Input('apply-filters-btn', 'n_clicks'),
-                Input('distribute-btn', 'n_clicks')
-            ],
-            [
-                State('upload-data', 'filename'),
-                State('stage-filter', 'value'),
-                State('type-filter', 'value'),
-                State('nationality-filter', 'value'),
-                State('client-note-filter', 'value'),
-                State('table-search', 'value'),
-                State('table-sort-field', 'value'),
-                State('records-per-page', 'value'),
-                State('users-to-distribute', 'value'),
-                State('detailed-table', 'data')
-            ]
-        )
+    [
+        Output('kpi-cards', 'children'),
+        Output('client-priority-chart', 'figure'),
+        Output('priority-stage-chart', 'figure'),
+        Output('detailed-table', 'data'),
+        Output('detailed-table', 'columns'),
+        Output('stage-filter', 'options'),
+        Output('type-filter', 'options'),
+        Output('nationality-filter', 'options'),
+        Output('last-update', 'children'),
+        Output('alerts-area', 'children')
+    ],
+    [
+        Input('upload-data', 'contents'),
+        Input('apply-filters-btn', 'n_clicks'),
+        Input('distribute-btn', 'n_clicks')
+    ],
+    [
+        State('upload-data', 'filename'),
+        State('stage-filter', 'value'),
+        State('type-filter', 'value'),
+        State('nationality-filter', 'value'),
+        State('client-note-filter', 'value'),
+        State('table-search', 'value'),
+        State('table-sort-field', 'value'),
+        State('records-per-page', 'value'),
+        State('users-to-distribute', 'value'),
+        State('detailed-table', 'data')
+    ]
+)
         def update_dashboard(contents, filter_clicks, distribute_clicks,
-                    filename, stage_filter, type_filter,
-                    nationality_filter, client_note_filter,
-                    search_value, sort_field, records_per_page,
-                    selected_users, table_data):
-                """
-                Comprehensive dashboard update callback handling file uploads, filtering, and data distribution.
-                
-                Returns:
-                    tuple: Updated components for the dashboard
-                """
-                ctx = dash.callback_context
-                if not ctx.triggered:
-                    return [[], {}, {}, [], [], [], [], [], "", None]
+                            filename, stage_filter, type_filter,
+                            nationality_filter, client_note_filter,
+                            search_value, sort_field, records_per_page,
+                            selected_users, table_data):
+            """
+            Comprehensive dashboard update callback handling file uploads, filtering, and data distribution.
             
-                trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-                
-                # Initialize empty returns for error cases
-                empty_returns = [[], {}, {}, [], [], [], [], [], "", None]
-                
-                # Handle distribution button click
-                if trigger_id == 'distribute-btn':
-                    if not selected_users or not table_data:
-                        return dash.no_update * 9 + (
-                            dbc.Alert(
-                                "Please select users and ensure there is data to distribute",
-                                color="warning",
-                                dismissable=True
-                            ),
-                        )
-                    try:
-                        df = pd.DataFrame(table_data)
-                        results = self.user_manager.distribute_data(selected_users, df)
-                        
-                        success_count = sum(1 for r in results.values() 
-                                        if isinstance(r, dict) and r.get("status") == "success")
-                        error_count = sum(1 for r in results.values() 
-                                        if isinstance(r, dict) and r.get("status") == "error")
-                        
-                        alert = dbc.Alert(
-                            [
-                                html.H5("Distribution Results", className="mb-3"),
-                                html.P(f"Successfully distributed to {success_count} users"),
-                                html.P(f"Errors: {error_count}")
-                            ],
-                            color="success" if error_count == 0 else "warning",
+            Returns:
+                tuple: Updated components for the dashboard
+            """
+            # Initialize empty returns for error cases
+            empty_returns = [[], {}, {}, [], [], [], [], [], "", None]
+            
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                return empty_returns
+
+            trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+            
+            # Handle distribution button click
+            if trigger_id == 'distribute-btn':
+                if not selected_users or not table_data:
+                    return dash.no_update * 9 + (
+                        dbc.Alert(
+                            "Please select users and ensure there is data to distribute",
+                            color="warning",
                             dismissable=True
-                        )
-                        
-                        return dash.no_update * 9 + (alert,)
-                        
-                    except Exception as e:
-                        return dash.no_update * 9 + (
-                            dbc.Alert(
-                                str(e),
-                                color="danger",
-                                dismissable=True
-                            ),
-                        )
-            
-                # Handle file upload
-                if contents is None:
-                    return empty_returns
-            
+                        ),
+                    )
+                
                 try:
-                    # Process uploaded file
-                    content_type, content_string = contents.split(',')
-                    decoded = base64.b64decode(content_string)
+                    df = pd.DataFrame(table_data)
+                    results = self.user_manager.distribute_data(selected_users, df)
                     
-                    if filename.endswith('.xlsx'):
-                        # Enhanced Excel reading with proper error handling
-                        df = pd.read_excel(
-                            io.BytesIO(decoded),
-                            engine='openpyxl',
-                            na_values=[
-                                '', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN',
-                                '<NA>', 'N/A', 'NA', 'NULL', 'NaN', 'n/a', 'null'
-                            ],
-                            keep_default_na=True
-                        )
-                    elif filename.endswith('.csv'):
-                        # Enhanced CSV reading
-                        df = pd.read_csv(
-                            io.BytesIO(decoded),
-                            na_values=[
-                                '', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN',
-                                '<NA>', 'N/A', 'NA', 'NULL', 'NaN', 'n/a', 'null'
-                            ],
-                            keep_default_na=True
-                        )
-                    else:
-                        raise ValueError("Unsupported file format. Please upload an Excel (.xlsx) or CSV file.")
-            
-                    # Process the data through our enhanced processor
-                    self.df = self.process_data(df)
+                    success_count = sum(1 for r in results.values() 
+                                    if isinstance(r, dict) and r.get("status") == "success")
+                    error_count = sum(1 for r in results.values() 
+                                    if isinstance(r, dict) and r.get("status") == "error")
                     
-                    # Apply filters if they exist
-                    filtered_df = self.df.copy()
-                    
-                    if stage_filter:
-                        filtered_df = filtered_df[filtered_df['Current Stage'].isin(stage_filter)]
-                    if type_filter:
-                        filtered_df = filtered_df[filtered_df['Type'].isin(type_filter)]
-                    if nationality_filter:
-                        filtered_df = filtered_df[filtered_df['Nationality'].isin(nationality_filter)]
-                    if client_note_filter:
-                        filtered_df = filtered_df[filtered_df['Client Note'].isin(client_note_filter)]
-                    
-                    # Apply search if it exists
-                    if search_value:
-                        search = search_value.lower()
-                        filtered_df = filtered_df[
-                            filtered_df.astype(str).apply(lambda x: x.str.lower()).apply(
-                                lambda x: x.str.contains(search, na=False)
-                            ).any(axis=1)
-                        ]
-            
-                    # Create visualizations
-                    kpi_cards = self.create_kpi_cards(filtered_df)
-                    client_priority_fig = self.create_client_priority_chart(filtered_df)
-                    priority_stage_fig = self.create_priority_stage_chart(filtered_df)
-            
-                    # Apply sorting if specified
-                    if sort_field:
-                        filtered_df = filtered_df.sort_values(sort_field, ascending=False)
-            
-                    # Prepare table data
-                    table_data = filtered_df.to_dict('records')
-                    columns = [{'name': i, 'id': i} for i in filtered_df.columns]
-            
-                    # Create filter options with counts
-                    def create_options_with_counts(column):
-                        value_counts = self.df[column].value_counts()
-                        return [
-                            {'label': f"{x} ({value_counts[x]})", 'value': x}
-                            for x in sorted(self.df[column].unique())
-                        ]
-            
-                    # Generate filter options
-                    stage_options = create_options_with_counts('Current Stage')
-                    type_options = create_options_with_counts('Type')
-                    nationality_options = create_options_with_counts('Nationality')
-            
-                    # Create last update timestamp
-                    update_time = html.Span([
-                        html.I(className="fas fa-clock me-1"),
-                        f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-                    ])
-            
-                    # Create success message
-                    success_alert = dbc.Alert(
+                    alert = dbc.Alert(
                         [
-                            html.H4("Success", className="alert-heading"),
-                            html.P(f"Successfully processed {len(filtered_df)} records."),
-                            html.Hr(),
-                            html.P(
-                                "Use the filters above to analyze the data.",
-                                className="mb-0"
-                            )
+                            html.H5("Distribution Results", className="mb-3"),
+                            html.P(f"Successfully distributed to {success_count} users"),
+                            html.P(f"Errors: {error_count}")
                         ],
-                        color="success",
+                        color="success" if error_count == 0 else "warning",
                         dismissable=True
                     )
-            
-                    return (
-                        kpi_cards,
-                        client_priority_fig,
-                        priority_stage_fig,
-                        table_data,
-                        columns,
-                        stage_options,
-                        type_options,
-                        nationality_options,
-                        update_time,
-                        success_alert
-                    )
-            
+                    
+                    return dash.no_update * 9 + (alert,)
+                    
                 except Exception as e:
-                    error_alert = dbc.Alert(
-                        [
-                            html.H4("Error Processing File", className="alert-heading"),
-                            html.P(f"An error occurred while processing your file: {str(e)}"),
-                            html.Hr(),
-                            html.P(
-                                "Please ensure your file is properly formatted and contains the required columns.",
-                                className="mb-0"
-                            )
-                        ],
-                        color="danger",
-                        dismissable=True
+                    return dash.no_update * 9 + (
+                        dbc.Alert(
+                            str(e),
+                            color="danger",
+                            dismissable=True
+                        ),
                     )
-                    return empty_returns[:-1] + [error_alert]
-            
+
+            # Handle file upload
             if contents is None:
                 return empty_returns
 
@@ -1902,78 +1771,128 @@ class DelayedMaidsAnalytics:
                 decoded = base64.b64decode(content_string)
                 
                 if filename.endswith('.xlsx'):
-                    self.df = pd.read_excel(io.BytesIO(decoded))
+                    # Enhanced Excel reading with proper error handling
+                    df = pd.read_excel(
+                        io.BytesIO(decoded),
+                        engine='openpyxl',
+                        na_values=[
+                            '', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN',
+                            '<NA>', 'N/A', 'NA', 'NULL', 'NaN', 'n/a', 'null'
+                        ],
+                        keep_default_na=True
+                    )
                 elif filename.endswith('.csv'):
-                    self.df = pd.read_csv(io.BytesIO(decoded))
+                    # Enhanced CSV reading
+                    df = pd.read_csv(
+                        io.BytesIO(decoded),
+                        na_values=[
+                            '', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN',
+                            '<NA>', 'N/A', 'NA', 'NULL', 'NaN', 'n/a', 'null'
+                        ],
+                        keep_default_na=True
+                    )
                 else:
                     raise ValueError("Unsupported file format. Please upload an Excel (.xlsx) or CSV file.")
+
+                # Process the data through our enhanced processor
+                self.df = self.process_data(df)
                 
-                self.df = self.process_data(self.df)
+                # Apply filters if they exist
+                filtered_df = self.df.copy()
+                
+                if stage_filter:
+                    filtered_df = filtered_df[filtered_df['Current Stage'].isin(stage_filter)]
+                if type_filter:
+                    filtered_df = filtered_df[filtered_df['Type'].isin(type_filter)]
+                if nationality_filter:
+                    filtered_df = filtered_df[filtered_df['Nationality'].isin(nationality_filter)]
+                if client_note_filter:
+                    filtered_df = filtered_df[filtered_df['Client Note'].isin(client_note_filter)]
+                
+                # Apply search if it exists
+                if search_value:
+                    search = search_value.lower()
+                    filtered_df = filtered_df[
+                        filtered_df.astype(str).apply(lambda x: x.str.lower()).apply(
+                            lambda x: x.str.contains(search, na=False)
+                        ).any(axis=1)
+                    ]
+
+                # Create visualizations
+                kpi_cards = self.create_kpi_cards(filtered_df)
+                client_priority_fig = self.create_client_priority_chart(filtered_df)
+                priority_stage_fig = self.create_priority_stage_chart(filtered_df)
+
+                # Apply sorting if specified
+                if sort_field:
+                    filtered_df = filtered_df.sort_values(sort_field, ascending=False)
+
+                # Prepare table data
+                table_data = filtered_df.to_dict('records')
+                columns = [{'name': i, 'id': i} for i in filtered_df.columns]
+
+                # Create filter options with counts
+                def create_options_with_counts(column):
+                    value_counts = self.df[column].value_counts()
+                    return [
+                        {'label': f"{x} ({value_counts[x]})", 'value': x}
+                        for x in sorted(self.df[column].unique())
+                    ]
+
+                # Generate filter options
+                stage_options = create_options_with_counts('Current Stage')
+                type_options = create_options_with_counts('Type')
+                nationality_options = create_options_with_counts('Nationality')
+
+                # Create last update timestamp
+                update_time = html.Span([
+                    html.I(className="fas fa-clock me-1"),
+                    f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                ])
+
+                # Create success message
+                success_alert = dbc.Alert(
+                    [
+                        html.H4("Success", className="alert-heading"),
+                        html.P(f"Successfully processed {len(filtered_df)} records."),
+                        html.Hr(),
+                        html.P(
+                            "Use the filters above to analyze the data.",
+                            className="mb-0"
+                        )
+                    ],
+                    color="success",
+                    dismissable=True
+                )
+
+                return (
+                    kpi_cards,
+                    client_priority_fig,
+                    priority_stage_fig,
+                    table_data,
+                    columns,
+                    stage_options,
+                    type_options,
+                    nationality_options,
+                    update_time,
+                    success_alert
+                )
+
             except Exception as e:
-                return empty_returns[:-1] + [
-                    dbc.Alert(
-                        f"Error processing data: {str(e)}", 
-                        color="danger", 
-                        dismissable=True
-                    )
-                ]
-
-            # Apply filters
-            filtered_df = self.df.copy()
-            
-            if stage_filter:
-                filtered_df = filtered_df[filtered_df['Current Stage'].isin(stage_filter)]
-            if type_filter:
-                filtered_df = filtered_df[filtered_df['Type'].isin(type_filter)]
-            if nationality_filter:
-                filtered_df = filtered_df[filtered_df['Nationality'].isin(nationality_filter)]
-            if client_note_filter:
-                filtered_df = filtered_df[filtered_df['Client Note'].isin(client_note_filter)]
-                
-            # Enhanced search functionality
-            if search_value:
-                search = search_value.lower()
-                filtered_df = filtered_df[
-                    filtered_df.astype(str).apply(lambda x: x.str.lower()).apply(
-                        lambda x: x.str.contains(search, na=False)
-                    ).any(axis=1)
-                ]
-
-            # Create visualizations
-            kpi_cards = self.create_kpi_cards(filtered_df)
-            client_priority_fig = self.create_client_priority_chart(filtered_df)
-            priority_stage_fig = self.create_priority_stage_chart(filtered_df)
-
-            # Enhanced sorting
-            if sort_field:
-                filtered_df = filtered_df.sort_values(sort_field, ascending=False)
-            
-            # Prepare table data with formatted values
-            table_data = filtered_df.to_dict('records')
-            columns = [{'name': i, 'id': i} for i in filtered_df.columns]
-
-            # Create filter options with counts
-            def create_options_with_counts(column):
-                value_counts = self.df[column].value_counts()
-                return [{'label': f"{x} ({value_counts[x]})", 'value': x} 
-                    for x in sorted(self.df[column].unique())]
-
-            stage_options = create_options_with_counts('Current Stage')
-            type_options = create_options_with_counts('Type')
-            nationality_options = create_options_with_counts('Nationality')
-
-            # Update time with enhanced formatting
-            update_time = html.Span([
-                html.I(className="fas fa-clock me-1"),
-                f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-            ])
-
-            return (
-                kpi_cards, client_priority_fig, priority_stage_fig,
-                table_data, columns, stage_options, type_options, nationality_options,
-                update_time, None
-            )
-        
+                error_alert = dbc.Alert(
+                    [
+                        html.H4("Error Processing File", className="alert-heading"),
+                        html.P(f"An error occurred while processing your file: {str(e)}"),
+                        html.Hr(),
+                        html.P(
+                            "Please ensure your file is properly formatted and contains the required columns.",
+                            className="mb-0"
+                        )
+                    ],
+                    color="danger",
+                    dismissable=True
+                )
+                return empty_returns[:-1] + [error_alert]
 
     def add_custom_css(self):
         """Add comprehensive custom CSS styles."""
