@@ -18,13 +18,10 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 import traceback
 # Constants remain the same
-def load_thresholds():
-    try:
-        with open('task_thresholds.json', 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        # Default thresholds
-        default_thresholds = {
+class ThresholdManager:
+    def __init__(self):
+        self.default_threshold = 24  # Default threshold in hours
+        self.thresholds = {
             'Prepare EID application': 24,
             'Waiting for the maid to go to medical test and EID fingerprinting': 24,
             'Check tasheel contract approval': 24,
@@ -72,12 +69,40 @@ def load_thresholds():
             'Approve signed Offer Letter': 24,
             'Upload tasheel contract to ERP': 24
         }
-        # Save default thresholds
-        with open('task_thresholds.json', 'w') as f:
-            json.dump(default_thresholds, f, indent=2)
-        return default_thresholds
+    
+    def get_threshold(self, stage):
+        """Get threshold for a specific stage"""
+        return self.thresholds.get(stage, self.default_threshold)
+    
+    def set_threshold(self, stage, hours):
+        """Set threshold for a specific stage"""
+        try:
+            hours = float(hours)
+            if hours <= 0:
+                raise ValueError("Threshold must be positive")
+            self.thresholds[stage] = hours
+            return True
+        except (ValueError, TypeError):
+            return False
+    
+    def get_all_thresholds(self):
+        """Get all thresholds as a list of dicts for the data table"""
+        return [
+            {'stage': stage, 'threshold': threshold}
+            for stage, threshold in self.thresholds.items()
+        ]
+    
+    def bulk_update_thresholds(self, new_thresholds):
+        """Update multiple thresholds at once"""
+        try:
+            for stage, threshold in new_thresholds.items():
+                if not self.set_threshold(stage, threshold):
+                    return False
+            return True
+        except Exception:
+            return False
 
-TASK_THRESHOLDS = load_thresholds()
+
 @dataclass
 class User:
     name: str
@@ -417,42 +442,85 @@ class DelayedMaidsAnalytics:
                 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css'
             ],
             title="Delayed Cases Analytics",
-            prevent_initial_callbacks='initial_duplicate'  # Add this line
+            prevent_initial_callbacks='initial_duplicate'
         )
         self.server = self.app.server 
         self.df = pd.DataFrame()
         self.user_manager = UserManager()
-    def save_thresholds(self, new_thresholds):
-        """Save thresholds to file and update global variable."""
-        global TASK_THRESHOLDS
-        with open('task_thresholds.json', 'w') as f:
-            json.dump(new_thresholds, f, indent=2)
-        TASK_THRESHOLDS = new_thresholds
-        if hasattr(self, 'df') and not self.df.empty:
-            self.df = self.process_data(self.df)
-
-    def create_threshold_inputs(self, stages):
-        """Create input fields for each stage."""
-        input_groups = []
-        for stage in sorted(stages):
-            input_groups.append(
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Label(stage, className="mt-2"),
-                        dbc.InputGroup([
-                            dbc.Input(
-                                type="number",
-                                min=1,
-                                value=TASK_THRESHOLDS.get(stage, 24),
-                                id={"type": "threshold-input", "stage": stage},
-                                className="threshold-input"
-                            ),
-                            dbc.InputGroupText("hours")
-                        ], className="mb-2")
-                    ])
+        self.threshold_manager = ThresholdManager()  # Add the threshold manager
+        
+    def create_threshold_modal(self):
+        """Create modal for threshold configuration"""
+        return dbc.Modal([
+            dbc.ModalHeader([
+                html.H5([
+                    html.I(className="fas fa-clock me-2"),
+                    "Stage Thresholds Configuration"
                 ])
-            )
-        return input_groups
+            ]),
+            dbc.ModalBody([
+                html.Div([
+                    html.H6("Configure Time Thresholds per Stage", className="mb-3"),
+                    dbc.Alert([
+                        html.I(className="fas fa-info-circle me-2"),
+                        "Set the maximum allowed time (in hours) for each stage. Cases exceeding these thresholds will be flagged as delayed."
+                    ], color="info", className="mb-3"),
+                    dash_table.DataTable(
+                        id='threshold-table',
+                        columns=[
+                            {'name': 'Stage', 'id': 'stage', 'type': 'text'},
+                            {'name': 'Threshold (hours)', 'id': 'threshold', 'type': 'numeric', 'editable': True}
+                        ],
+                        data=self.threshold_manager.get_all_thresholds(),
+                        editable=True,
+                        filter_action="native",
+                        sort_action="native",
+                        sort_mode="single",
+                        page_action="native",
+                        page_size=10,
+                        style_table={'overflowX': 'auto'},
+                        style_cell={
+                            'textAlign': 'left',
+                            'padding': '12px',
+                            'whiteSpace': 'normal',
+                            'height': 'auto',
+                        },
+                        style_header={
+                            'backgroundColor': '#f8f9fa',
+                            'fontWeight': 'bold'
+                        },
+                        style_data_conditional=[
+                            {
+                                'if': {'column_id': 'threshold', 'filter_query': '{threshold} > 72'},
+                                'backgroundColor': '#ffebee',
+                                'color': '#c62828'
+                            }
+                        ]
+                    )
+                ])
+            ]),
+            dbc.ModalFooter([
+                dbc.Button(
+                    ["Reset to Default ", html.I(className="fas fa-undo")],
+                    id="reset-thresholds-btn",
+                    color="secondary",
+                    className="me-2"
+                ),
+                dbc.Button(
+                    ["Save Changes ", html.I(className="fas fa-save")],
+                    id="save-thresholds-btn",
+                    color="primary",
+                    className="me-2"
+                ),
+                dbc.Button(
+                    "Close",
+                    id="close-threshold-modal-btn",
+                    color="light"
+                )
+            ])
+        ], id="threshold-modal", size="lg")
+
+        
     def create_kpi_cards(self, df):
         """Create KPI cards with metrics."""
         total_cases = len(df)
@@ -741,8 +809,8 @@ class DelayedMaidsAnalytics:
                 if field in df.columns:
                     df[field] = df[field].astype(str).replace('nan', default).fillna(default)
             
-            # Calculate delays and severity
-            df['Threshold (in hours)'] = df['Current Stage'].map(TASK_THRESHOLDS).fillna(24)
+            # Use threshold manager for calculations
+            df['Threshold (in hours)'] = df['Current Stage'].apply(self.threshold_manager.get_threshold)
             df['Delay (hours)'] = (df['Time In Stage'] - df['Threshold (in hours)']).fillna(0)
             
             df['Threshold Ratio'] = df['Time In Stage'] / df['Threshold (in hours)']
@@ -960,43 +1028,7 @@ class DelayedMaidsAnalytics:
                         ])
                     ])
                 ], className="mb-4 shadow-sm"),
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.H5([
-                            html.I(className="fas fa-clock me-2"),
-                            "Stage Thresholds Management"
-                        ]),
-                    ]),
-                    dbc.CardBody([
-                        dbc.Alert([
-                            html.I(className="fas fa-info-circle me-2"),
-                            "Set custom thresholds for each stage (in hours). Default is 24 hours."
-                        ], color="info", className="mb-3"),
-                        html.Div([
-                            dbc.Row([
-                                dbc.Col([
-                                    html.Div(id='threshold-inputs')
-                                ], width=12)
-                            ]),
-                            dbc.Row([
-                                dbc.Col([
-                                    dbc.Button(
-                                        ["Save Thresholds ", html.I(className="fas fa-save ms-1")],
-                                        id="save-thresholds-btn",
-                                        color="primary",
-                                        className="mt-3"
-                                    ),
-                                    dbc.Button(
-                                        ["Reset to Default ", html.I(className="fas fa-undo ms-1")],
-                                        id="reset-thresholds-btn",
-                                        color="secondary",
-                                        className="mt-3 ms-2"
-                                    )
-                                ], width=12)
-                            ])
-                        ])
-                    ])
-                ], className="mb-4 shadow-sm"),
+
                 dbc.Card([
                     dbc.CardHeader([
                         html.H5([
@@ -1248,87 +1280,7 @@ class DelayedMaidsAnalytics:
 
     def setup_callbacks(self):
         """Set up enhanced callbacks with new filter functionality."""
-        @self.app.callback(
-            Output('threshold-inputs', 'children'),
-            [Input('upload-data', 'contents')],
-            [State('upload-data', 'filename')]
-        )
-        def update_threshold_inputs(contents, filename):
-            """Update threshold input fields when new data is uploaded."""
-            if contents is None:
-                return []
-            
-            try:
-                if not hasattr(self, 'df') or self.df.empty:
-                    return []
-                
-                stages = self.df['Current Stage'].unique()
-                return self.create_threshold_inputs(stages)
-            except Exception as e:
-                print(f"Error updating threshold inputs: {str(e)}")
-                return []
 
-        @self.app.callback(
-            [Output('alerts-area', 'children'),
-            Output({'type': 'threshold-input', 'stage': dash.ALL}, 'value')],
-            [Input('save-thresholds-btn', 'n_clicks'),
-            Input('reset-thresholds-btn', 'n_clicks')],
-            [State({'type': 'threshold-input', 'stage': dash.ALL}, 'id'),
-            State({'type': 'threshold-input', 'stage': dash.ALL}, 'value')]
-        )
-        def manage_thresholds(save_clicks, reset_clicks, input_ids, input_values):
-            """Handle saving and resetting thresholds."""
-            ctx = dash.callback_context
-            if not ctx.triggered:
-                return dash.no_update, dash.no_update
-
-            trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-            
-            try:
-                if trigger_id == 'save-thresholds-btn':
-                    # Create new thresholds dictionary
-                    new_thresholds = {
-                        input_id['stage']: float(value)
-                        for input_id, value in zip(input_ids, input_values)
-                    }
-                    self.save_thresholds(new_thresholds)
-                    return (
-                        dbc.Alert(
-                            "Thresholds saved successfully!",
-                            color="success",
-                            dismissable=True,
-                            duration=4000
-                        ),
-                        dash.no_update
-                    )
-                
-                elif trigger_id == 'reset-thresholds-btn':
-                    # Reset to default 24 hours
-                    default_values = [24] * len(input_ids)
-                    default_thresholds = {
-                        input_id['stage']: 24
-                        for input_id in input_ids
-                    }
-                    self.save_thresholds(default_thresholds)
-                    return (
-                        dbc.Alert(
-                            "Thresholds reset to default (24 hours).",
-                            color="info",
-                            dismissable=True,
-                            duration=4000
-                        ),
-                        default_values
-                    )
-                    
-            except Exception as e:
-                return (
-                    dbc.Alert(
-                        f"Error managing thresholds: {str(e)}",
-                        color="danger",
-                        dismissable=True
-                    ),
-                    dash.no_update
-                )
         # Callback for opening/closing the modal
         @self.app.callback(
             Output("user-management-modal", "is_open"),
@@ -1829,15 +1781,7 @@ class DelayedMaidsAnalytics:
             .Select-control:hover {
                 border-color: var(--primary-light) !important;
             }
-            .threshold-input {
-                width: 100px !important;
-            }
 
-            .threshold-label {
-                font-size: 0.9rem;
-                color: #666;
-                margin-bottom: 0.25rem;
-            }
             .Select-menu-outer {
                 border: none !important;
                 border-radius: 8px !important;
