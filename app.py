@@ -18,28 +18,67 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 import traceback
 # Constants remain the same
-CURRENT_STAGES = [
-    'Prepare EID application', 'Waiting for the maid to go to medical test and EID fingerprinting',
-    'Check tasheel contract approval', 'Insert Labour Card Expiry Date', 
-    'Pending medical certificate approval from DHA', 'Receive of Health Insurance Card', 
-    'Receival of EID Card', 'MissingDocuments', 'Pause e-visa application', 
-    'Submit Nawakes in Tasheel', 'Check Work Permit Ministry Approval', 'E-visa Issue solved', 
-    'Fix the problem of entry visa', 'Awaiting to receive flight ticket schedule', 
-    'Fix work permit issues', 'Apply for R-visa', 'Pay Challenge overstay fines application fees', 
-    'Modify EID Application', 'Refund Entry Visa Application', 'Check Entry Visa Immigration Approval', 
-    'Waiting for reply of Ansari', 'Pending to cancel active visa', 'Pending to fix MOHRE issue', 
-    'Prepare medical application', 'Pending maid to go for EID Biometrics', 'Prepare insurance application', 
-    'Upload Contract to Tasheel', 'Pending offer letter to be signed', 
-    'prepare_eid_application_for_modification', 'Apply for Ansari', 'ChangeofStatus', 
-    'Get Form from GDRFA', 'Pending to remove absconding', 'Create Regular Offer Letter', 
-    'Modify Offer Letter', 'Prepare folder containing E-visa medical application and EID', 
-    'Check Labour Card Approval', 'Repeat Medical', 'Waiting for the PRO Update', 
-    'Waiting for Personal Photo', 'Check ID application type', 
-    'Getting the Confirmation to Proceed with Change of Status', 'Apply for entry Visa', 
-    'Upload Change of status', 'Approve signed Offer Letter', 'Upload tasheel contract to ERP'
-]
+def load_thresholds():
+    try:
+        with open('task_thresholds.json', 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        # Default thresholds
+        default_thresholds = {
+            'Prepare EID application': 24,
+            'Waiting for the maid to go to medical test and EID fingerprinting': 24,
+            'Check tasheel contract approval': 24,
+            'Insert Labour Card Expiry Date': 24,
+            'Pending medical certificate approval from DHA': 24,
+            'Receive of Health Insurance Card': 24,
+            'Receival of EID Card': 24,
+            'MissingDocuments': 24,
+            'Pause e-visa application': 24,
+            'Submit Nawakes in Tasheel': 24,
+            'Check Work Permit Ministry Approval': 24,
+            'E-visa Issue solved': 24,
+            'Fix the problem of entry visa': 24,
+            'Awaiting to receive flight ticket schedule': 24,
+            'Fix work permit issues': 24,
+            'Apply for R-visa': 24,
+            'Pay Challenge overstay fines application fees': 24,
+            'Modify EID Application': 24,
+            'Refund Entry Visa Application': 24,
+            'Check Entry Visa Immigration Approval': 24,
+            'Waiting for reply of Ansari': 24,
+            'Pending to cancel active visa': 24,
+            'Pending to fix MOHRE issue': 24,
+            'Prepare medical application': 24,
+            'Pending maid to go for EID Biometrics': 24,
+            'Prepare insurance application': 24,
+            'Upload Contract to Tasheel': 24,
+            'Pending offer letter to be signed': 24,
+            'prepare_eid_application_for_modification': 24,
+            'Apply for Ansari': 24,
+            'ChangeofStatus': 24,
+            'Get Form from GDRFA': 24,
+            'Pending to remove absconding': 24,
+            'Create Regular Offer Letter': 24,
+            'Modify Offer Letter': 24,
+            'Prepare folder containing E-visa medical application and EID': 24,
+            'Check Labour Card Approval': 24,
+            'Repeat Medical': 24,
+            'Waiting for the PRO Update': 24,
+            'Waiting for Personal Photo': 24,
+            'Check ID application type': 24,
+            'Getting the Confirmation to Proceed with Change of Status': 24,
+            'Apply for entry Visa': 24,
+            'Upload Change of status': 24,
+            'Approve signed Offer Letter': 24,
+            'Upload tasheel contract to ERP': 24
+        }
+        # Save default thresholds
+        with open('task_thresholds.json', 'w') as f:
+            json.dump(default_thresholds, f, indent=2)
+        return default_thresholds
 
-TASK_THRESHOLDS = {stage: 24 for stage in CURRENT_STAGES}
+TASK_THRESHOLDS = load_thresholds()
+
 @dataclass
 class User:
     name: str
@@ -384,6 +423,37 @@ class DelayedMaidsAnalytics:
         self.server = self.app.server 
         self.df = pd.DataFrame()
         self.user_manager = UserManager()
+    def save_thresholds(self, new_thresholds):
+        """Save thresholds to file and update global variable."""
+        global TASK_THRESHOLDS
+        with open('task_thresholds.json', 'w') as f:
+            json.dump(new_thresholds, f, indent=2)
+        TASK_THRESHOLDS = new_thresholds
+        if hasattr(self, 'df') and not self.df.empty:
+            self.df = self.process_data(self.df)
+
+    def create_threshold_inputs(self, stages):
+        """Create input fields for each stage."""
+        input_groups = []
+        for stage in sorted(stages):
+            input_groups.append(
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Label(stage, className="mt-2"),
+                        dbc.InputGroup([
+                            dbc.Input(
+                                type="number",
+                                min=1,
+                                value=TASK_THRESHOLDS.get(stage, 24),
+                                id={"type": "threshold-input", "stage": stage},
+                                className="threshold-input"
+                            ),
+                            dbc.InputGroupText("hours")
+                        ], className="mb-2")
+                    ])
+                ])
+            )
+        return input_groups
         
     def create_kpi_cards(self, df):
         """Create KPI cards with metrics."""
@@ -676,10 +746,7 @@ class DelayedMaidsAnalytics:
             # Calculate delays and severity
             df['Threshold (in hours)'] = df['Current Stage'].map(TASK_THRESHOLDS).fillna(24)
             df['Delay (hours)'] = (df['Time In Stage'] - df['Threshold (in hours)']).fillna(0)
-            df = df[df['Delay (hours)'] > 0]
             
-            
-                        
             df['Threshold Ratio'] = df['Time In Stage'] / df['Threshold (in hours)']
             df['Severity'] = pd.cut(
                 df['Threshold Ratio'],
@@ -895,14 +962,6 @@ class DelayedMaidsAnalytics:
                         ])
                     ])
                 ], className="mb-4 shadow-sm"),
-                dbc.Row([
-                dbc.Col([
-                    html.Label("Set Threshold for a Stage"),
-                    dcc.Input(id='threshold-input', type='text', 
-                              placeholder='e.g., Stage Name,48', debounce=True),
-                    dbc.Button("Update Threshold", id='update-threshold-btn', color='primary', className="mt-2")
-                ], width=6)
-            ], className="mb-3"),
 
                 dbc.Card([
                     dbc.CardHeader([
@@ -944,6 +1003,43 @@ class DelayedMaidsAnalytics:
                         ])
                     ])
                 ], className="mb-4 shadow-sm"),
+                dbc.Card([
+                dbc.CardHeader([
+                    html.H5([
+                        html.I(className="fas fa-clock me-2"),
+                        "Stage Thresholds Management"
+                    ]),
+                ]),
+                dbc.CardBody([
+                    dbc.Alert([
+                        html.I(className="fas fa-info-circle me-2"),
+                        "Set custom thresholds for each stage (in hours). Default is 24 hours."
+                    ], color="info", className="mb-3"),
+                    html.Div([
+                        dbc.Row([
+                            dbc.Col([
+                                html.Div(id='threshold-inputs')
+                            ], width=12)
+                        ]),
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Button(
+                                    ["Save Thresholds ", html.I(className="fas fa-save ms-1")],
+                                    id="save-thresholds-btn",
+                                    color="primary",
+                                    className="mt-3"
+                                ),
+                                dbc.Button(
+                                    ["Reset to Default ", html.I(className="fas fa-undo ms-1")],
+                                    id="reset-thresholds-btn",
+                                    color="secondary",
+                                    className="mt-3 ms-2"
+                                )
+                            ], width=12)
+                        ])
+                    ])
+                ])
+            ], className="mb-4 shadow-sm"),
                 # Enhanced Severity Legend with Icons
                 dbc.Card([
                     dbc.CardBody([
@@ -1155,32 +1251,93 @@ class DelayedMaidsAnalytics:
 
     def setup_callbacks(self):
         """Set up enhanced callbacks with new filter functionality."""
-        @app.callback(
-            Output('alerts-area', 'children'),
-            Input('update-threshold-btn', 'n_clicks'),
-            State('threshold-input', 'value')
-        )
-        def update_threshold(n_clicks, input_value):
-            if not n_clicks or not input_value:
-                return dash.no_update
-        
-            try:
-                stage, threshold = input_value.split(',')
-                threshold = float(threshold)
-                if stage in TASK_THRESHOLDS:
-                    TASK_THRESHOLDS[stage] = threshold
-                    return dbc.Alert(f"Updated threshold for '{stage}' to {threshold} hours", color="success")
-                else:
-                    return dbc.Alert(f"Stage '{stage}' not found", color="danger")
-            except Exception as e:
-                return dbc.Alert(f"Error: {str(e)}", color="danger")
-
         # Callback for opening/closing the modal
+    @self.app.callback(
+        Output('threshold-inputs', 'children'),
+        [Input('upload-data', 'contents')],
+        [State('upload-data', 'filename')]
+    )
+    def update_threshold_inputs(contents, filename):
+        """Update threshold input fields when new data is uploaded."""
+        if contents is None:
+            return []
+        
+        try:
+            if not hasattr(self, 'df') or self.df.empty:
+                return []
+            
+            stages = self.df['Current Stage'].unique()
+            return self.create_threshold_inputs(stages)
+        except Exception as e:
+            print(f"Error updating threshold inputs: {str(e)}")
+            return []
+    
+    @self.app.callback(
+        [Output('alerts-area', 'children'),
+         Output({'type': 'threshold-input', 'stage': dash.ALL}, 'value')],
+        [Input('save-thresholds-btn', 'n_clicks'),
+         Input('reset-thresholds-btn', 'n_clicks')],
+        [State({'type': 'threshold-input', 'stage': dash.ALL}, 'id'),
+         State({'type': 'threshold-input', 'stage': dash.ALL}, 'value')]
+    )
+    def manage_thresholds(save_clicks, reset_clicks, input_ids, input_values):
+        """Handle saving and resetting thresholds."""
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            return dash.no_update, dash.no_update
+    
+        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        
+        try:
+            if trigger_id == 'save-thresholds-btn':
+                # Create new thresholds dictionary
+                new_thresholds = {
+                    input_id['stage']: float(value)
+                    for input_id, value in zip(input_ids, input_values)
+                }
+                self.save_thresholds(new_thresholds)
+                return (
+                    dbc.Alert(
+                        "Thresholds saved successfully!",
+                        color="success",
+                        dismissable=True,
+                        duration=4000
+                    ),
+                    dash.no_update
+                )
+            
+            elif trigger_id == 'reset-thresholds-btn':
+                # Reset to default 24 hours
+                default_values = [24] * len(input_ids)
+                default_thresholds = {
+                    input_id['stage']: 24
+                    for input_id in input_ids
+                }
+                self.save_thresholds(default_thresholds)
+                return (
+                    dbc.Alert(
+                        "Thresholds reset to default (24 hours).",
+                        color="info",
+                        dismissable=True,
+                        duration=4000
+                    ),
+                    default_values
+                )
+                
+        except Exception as e:
+            return (
+                dbc.Alert(
+                    f"Error managing thresholds: {str(e)}",
+                    color="danger",
+                    dismissable=True
+                ),
+                dash.no_update
+            )
         @self.app.callback(
             Output("user-management-modal", "is_open"),
             [Input("open-user-modal", "n_clicks")],
             [State("user-management-modal", "is_open")],
-            prevent_initial_call=True  # Add this line
+            prevent_initial_call=True  
         )
         def toggle_modal(n1, is_open):
             if n1:
@@ -1528,7 +1685,7 @@ class DelayedMaidsAnalytics:
                 ]
 
             # Apply filters
-            filtered_df = self.df[self.df['Delay (hours)'] > 0].copy()
+            filtered_df = self.df.copy()
             
             if stage_filter:
                 filtered_df = filtered_df[filtered_df['Current Stage'].isin(stage_filter)]
@@ -1603,7 +1760,15 @@ class DelayedMaidsAnalytics:
                 --border-radius: 12px;
                 --transition: all 0.3s ease;
             }
-
+            .threshold-input {
+                    width: 100px !important;
+                }
+                
+                .threshold-label {
+                    font-size: 0.9rem;
+                    color: #666;
+                    margin-bottom: 0.25rem;
+                }
             /* Global Styles */
             body {
                 background-color: var(--neutral-light);
@@ -1896,4 +2061,4 @@ else:
     analytics_app.create_layout()
     analytics_app.setup_callbacks()
     server = analytics_app.app.server
-
+    
