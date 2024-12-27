@@ -1291,76 +1291,76 @@ class DelayedMaidsAnalytics:
     def setup_callbacks(self):
         """Set up enhanced callbacks with new filter functionality."""
         @self.app.callback(
-        Output("threshold-modal", "is_open"),
-        [
-            Input("open-threshold-modal", "n_clicks"),
-            Input("close-threshold-modal-btn", "n_clicks"),
-            Input("save-thresholds-btn", "n_clicks")
-        ],
-        [State("threshold-modal", "is_open")],
-        prevent_initial_call=True
-    )
-    def toggle_threshold_modal(n1, n2, n3, is_open):
-        if n1 or n2 or n3:
-            return not is_open
-        return is_open
-    
-    @self.app.callback(
-        [Output('threshold-table', 'data'),
-         Output('alerts-area', 'children', allow_duplicate=True)],
-        [
-            Input('reset-thresholds-btn', 'n_clicks'),
-            Input('save-thresholds-btn', 'n_clicks')
-        ],
-        [State('threshold-table', 'data')],
-        prevent_initial_call=True
-    )
-    def manage_thresholds(reset_clicks, save_clicks, current_data):
-            ctx = dash.callback_context
-            if not ctx.triggered:
-                return dash.no_update, dash.no_update
-    
-            trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-            
-            try:
-                if trigger_id == 'reset-thresholds-btn':
-                    # Reset to default values
-                    self.threshold_manager = ThresholdManager()
-                    return self.threshold_manager.get_all_thresholds(), dbc.Alert(
-                        "All thresholds reset to default (24 hours)",
-                        color="success",
-                        duration=3000,
-                        is_open=True,
-                        dismissable=True
-                    )
-    
-                elif trigger_id == 'save-thresholds-btn':
-                    # Update thresholds from table data
-                    new_thresholds = {row['stage']: row['threshold'] for row in current_data}
-                    if self.threshold_manager.bulk_update_thresholds(new_thresholds):
-                        # Reprocess data if we have any loaded
-                        if not self.df.empty:
-                            self.df = self.process_data(self.df)
-                        return current_data, dbc.Alert(
-                            "Thresholds updated successfully",
+            Output("threshold-modal", "is_open"),
+            [
+                Input("open-threshold-modal", "n_clicks"),
+                Input("close-threshold-modal-btn", "n_clicks"),
+                Input("save-thresholds-btn", "n_clicks")
+            ],
+            [State("threshold-modal", "is_open")],
+            prevent_initial_call=True
+        )
+        def toggle_threshold_modal(n1, n2, n3, is_open):
+            if n1 or n2 or n3:
+                return not is_open
+            return is_open
+        
+        @self.app.callback(
+            [Output('threshold-table', 'data'),
+            Output('alerts-area', 'children', allow_duplicate=True)],
+            [
+                Input('reset-thresholds-btn', 'n_clicks'),
+                Input('save-thresholds-btn', 'n_clicks')
+            ],
+            [State('threshold-table', 'data')],
+            prevent_initial_call=True
+        )
+        def manage_thresholds(reset_clicks, save_clicks, current_data):
+                ctx = dash.callback_context
+                if not ctx.triggered:
+                    return dash.no_update, dash.no_update
+        
+                trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+                
+                try:
+                    if trigger_id == 'reset-thresholds-btn':
+                        # Reset to default values
+                        self.threshold_manager = ThresholdManager()
+                        return self.threshold_manager.get_all_thresholds(), dbc.Alert(
+                            "All thresholds reset to default (24 hours)",
                             color="success",
                             duration=3000,
                             is_open=True,
                             dismissable=True
                         )
-                    else:
-                        raise ValueError("Invalid threshold values")
-    
-            except Exception as e:
-                return self.threshold_manager.get_all_thresholds(), dbc.Alert(
-                    f"Error updating thresholds: {str(e)}",
-                    color="danger",
-                    duration=3000,
-                    is_open=True,
-                    dismissable=True
-                )
-            
-            return dash.no_update, dash.no_update
+        
+                    elif trigger_id == 'save-thresholds-btn':
+                        # Update thresholds from table data
+                        new_thresholds = {row['stage']: row['threshold'] for row in current_data}
+                        if self.threshold_manager.bulk_update_thresholds(new_thresholds):
+                            # Reprocess data if we have any loaded
+                            if not self.df.empty:
+                                self.df = self.process_data(self.df)
+                            return current_data, dbc.Alert(
+                                "Thresholds updated successfully",
+                                color="success",
+                                duration=3000,
+                                is_open=True,
+                                dismissable=True
+                            )
+                        else:
+                            raise ValueError("Invalid threshold values")
+        
+                except Exception as e:
+                    return self.threshold_manager.get_all_thresholds(), dbc.Alert(
+                        f"Error updating thresholds: {str(e)}",
+                        color="danger",
+                        duration=3000,
+                        is_open=True,
+                        dismissable=True
+                    )
+                
+                return dash.no_update, dash.no_update
         # Callback for opening/closing the modal
         @self.app.callback(
             Output("user-management-modal", "is_open"),
