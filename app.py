@@ -1168,7 +1168,7 @@ class DelayedMaidsAnalytics:
             if n1:
                 return not is_open
             return is_open
-         @self.app.callback(
+        @self.app.callback(
             Output('threshold-table', 'data'),
             [Input('upload-data', 'contents')],
             [State('upload-data', 'filename')]
@@ -1931,4 +1931,3 @@ else:
     analytics_app.create_layout()
     analytics_app.setup_callbacks()
     server = analytics_app.app.server
-
