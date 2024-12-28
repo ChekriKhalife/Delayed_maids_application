@@ -18,115 +18,29 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 import traceback
 # Constants remain the same
-class ThresholdManager:
-    def __init__(self):
-        self.default_threshold = 24  # Default threshold in hours
-        self.thresholds = {
-            'Prepare EID application': 24,
-            'Waiting for the maid to go to medical test and EID fingerprinting': 24,
-            'Check tasheel contract approval': 24,
-            'Insert Labour Card Expiry Date': 24,
-            'Pending medical certificate approval from DHA': 24,
-            'Receive of Health Insurance Card': 24,
-            'Receival of EID Card': 24,
-            'MissingDocuments': 24,
-            'Pause e-visa application': 24,
-            'Submit Nawakes in Tasheel': 24,
-            'Check Work Permit Ministry Approval': 24,
-            'E-visa Issue solved': 24,
-            'Fix the problem of entry visa': 24,
-            'Awaiting to receive flight ticket schedule': 24,
-            'Fix work permit issues': 24,
-            'Apply for R-visa': 24,
-            'Pay Challenge overstay fines application fees': 24,
-            'Modify EID Application': 24,
-            'Refund Entry Visa Application': 24,
-            'Check Entry Visa Immigration Approval': 24,
-            'Waiting for reply of Ansari': 24,
-            'Pending to cancel active visa': 24,
-            'Pending to fix MOHRE issue': 24,
-            'Prepare medical application': 24,
-            'Pending maid to go for EID Biometrics': 24,
-            'Prepare insurance application': 24,
-            'Upload Contract to Tasheel': 24,
-            'Pending offer letter to be signed': 24,
-            'prepare_eid_application_for_modification': 24,
-            'Apply for Ansari': 24,
-            'ChangeofStatus': 24,
-            'Get Form from GDRFA': 24,
-            'Pending to remove absconding': 24,
-            'Create Regular Offer Letter': 24,
-            'Modify Offer Letter': 24,
-            'Prepare folder containing E-visa medical application and EID': 24,
-            'Check Labour Card Approval': 24,
-            'Repeat Medical': 24,
-            'Waiting for the PRO Update': 24,
-            'Waiting for Personal Photo': 24,
-            'Check ID application type': 24,
-            'Getting the Confirmation to Proceed with Change of Status': 24,
-            'Apply for entry Visa': 24,
-            'Upload Change of status': 24,
-            'Approve signed Offer Letter': 24,
-            'Upload tasheel contract to ERP': 24
-        }
-    
-    def get_threshold(self, stage):
-        """Get threshold for a specific stage"""
-        return self.thresholds.get(stage, self.default_threshold)
-    def save_thresholds(self):
-        """Save thresholds to a JSON file"""
-        try:
-            with open('stage_thresholds.json', 'w') as f:
-                json.dump(self.thresholds, f, indent=2)
-            return True
-        except Exception as e:
-            print(f"Error saving thresholds: {str(e)}")
-            return False
-    
-    def load_thresholds(self):
-        """Load thresholds from JSON file"""
-        try:
-            with open('stage_thresholds.json', 'r') as f:
-                saved_thresholds = json.load(f)
-                # Update existing thresholds while preserving defaults for any new stages
-                self.thresholds.update(saved_thresholds)
-            return True
-        except FileNotFoundError:
-            # Use default thresholds if file doesn't exist
-            return True
-        except Exception as e:
-            print(f"Error loading thresholds: {str(e)}")
-            return False
-    def set_threshold(self, stage, hours):
-        """Set threshold for a specific stage"""
-        try:
-            hours = float(hours)
-            if hours <= 0:
-                raise ValueError("Threshold must be positive")
-            self.thresholds[stage] = hours
-            return True
-        except (ValueError, TypeError):
-            return False
-    
-    def get_all_thresholds(self):
-        """Get all thresholds as a list of dicts for the data table"""
-        return [
-            {'stage': stage, 'threshold': threshold}
-            for stage, threshold in self.thresholds.items()
-        ]
-    
-    def bulk_update_thresholds(self, new_thresholds):
-        """Update multiple thresholds at once"""
-        try:
-            for stage, threshold in new_thresholds.items():
-                if not self.set_threshold(stage, threshold):
-                    return False
-            # Save thresholds after successful update
-            self.save_thresholds()
-            return True
-        except Exception:
-            return False
-
+TASK_THRESHOLDS = {
+    'Apply for Work Permit - Stage 1': 168,
+    'Pay MOHRE Insurance': 24,
+    'Pay Work Permit Fees - Stage 2': 24,
+    'Check Work Permit Approval - Stage 1': 48,
+    'Check Work Permit Approval - Stage 2': 24,
+    'Fix Work Permit Issues - Stage -1': 24,
+    'Fix work permit issues - stage 2': 24,
+    'Apply for entry Visa': 24,
+    'Check Entry Visa Immigration Approval': 24,
+    'Change of Status': 24,
+    'Upload Change of status': 24,
+    'Prepare EID application (Receival Automated)': 96,
+    'Approve signed Offer Letter': 24,
+    'Apply for R-visa': 24,
+    'Upload The e-Residency': 24,
+    'Check ID application type': 24,
+    'Modify eid application': 240,
+    'Prepare EID Application for Modification': 48,
+    'Prepare medical application': 48,
+    'Prepare folder containing E-visa medical application and EID': 72,
+    'Receival of EID Card': 168
+}
 
 @dataclass
 class User:
@@ -175,7 +89,6 @@ class UserManager:
             )
         }
         self.setup_google_sheets()
-        self._load_user_config() 
     
     
     def validate_sheet_access(self, sheet_id):
@@ -468,84 +381,11 @@ class DelayedMaidsAnalytics:
                 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css'
             ],
             title="Delayed Cases Analytics",
-            prevent_initial_callbacks='initial_duplicate'
+            prevent_initial_callbacks='initial_duplicate'  # Add this line
         )
         self.server = self.app.server 
         self.df = pd.DataFrame()
         self.user_manager = UserManager()
-        self.threshold_manager = ThresholdManager()  # Add the threshold manager
-        
-    def create_threshold_modal(self):
-        """Create modal for threshold configuration"""
-        return dbc.Modal([
-            dbc.ModalHeader([
-                html.H5([
-                    html.I(className="fas fa-clock me-2"),
-                    "Stage Thresholds Configuration"
-                ])
-            ]),
-            dbc.ModalBody([
-                html.Div([
-                    html.H6("Configure Time Thresholds per Stage", className="mb-3"),
-                    dbc.Alert([
-                        html.I(className="fas fa-info-circle me-2"),
-                        "Set the maximum allowed time (in hours) for each stage. Cases exceeding these thresholds will be flagged as delayed."
-                    ], color="info", className="mb-3"),
-                    dash_table.DataTable(
-                        id='threshold-table',
-                        columns=[
-                            {'name': 'Stage', 'id': 'stage', 'type': 'text'},
-                            {'name': 'Threshold (hours)', 'id': 'threshold', 'type': 'numeric', 'editable': True}
-                        ],
-                        data=self.threshold_manager.get_all_thresholds(),
-                        editable=True,
-                        filter_action="native",
-                        sort_action="native",
-                        sort_mode="single",
-                        page_action="native",
-                        page_size=10,
-                        style_table={'overflowX': 'auto'},
-                        style_cell={
-                            'textAlign': 'left',
-                            'padding': '12px',
-                            'whiteSpace': 'normal',
-                            'height': 'auto',
-                        },
-                        style_header={
-                            'backgroundColor': '#f8f9fa',
-                            'fontWeight': 'bold'
-                        },
-                        style_data_conditional=[
-                            {
-                                'if': {'column_id': 'threshold', 'filter_query': '{threshold} > 72'},
-                                'backgroundColor': '#ffebee',
-                                'color': '#c62828'
-                            }
-                        ]
-                    )
-                ])
-            ]),
-            dbc.ModalFooter([
-                dbc.Button(
-                    ["Reset to Default ", html.I(className="fas fa-undo")],
-                    id="reset-thresholds-btn",
-                    color="secondary",
-                    className="me-2"
-                ),
-                dbc.Button(
-                    ["Save Changes ", html.I(className="fas fa-save")],
-                    id="save-thresholds-btn",
-                    color="primary",
-                    className="me-2"
-                ),
-                dbc.Button(
-                    "Close",
-                    id="close-threshold-modal-btn",
-                    color="light"
-                )
-            ])
-        ], id="threshold-modal", size="lg")
-
         
     def create_kpi_cards(self, df):
         """Create KPI cards with metrics."""
@@ -804,72 +644,26 @@ class DelayedMaidsAnalytics:
     
     
     def process_data(self, df):
-        """
-        Process the uploaded Excel data with enhanced error handling and data cleaning
-        
-        Args:
-            df (pd.DataFrame): Raw dataframe from uploaded Excel
-            
-        Returns:
-            pd.DataFrame: Cleaned and processed dataframe
-        """
+        """Process the uploaded data with proper handling of all fields."""
         try:
-            # Make a copy to avoid modifying original
             df = df.copy()
-            
-            # Step 1: Clean column names
             df.columns = df.columns.str.strip()
-            df.columns = df.columns.str.replace('\n', ' ')
             
-            # Step 2: Validate required columns
-            required_columns = [
-                'Housemaid ID', 
-                'Current Stage', 
-                'Time In Stage',
-                'Client Note',
-                'Error resolver page?',
-                'RPA try count',
-                'Latest Note',
-                'User',
-                'Note Time',
-                'Last RPA try time',
-                'Nationality',
-                'Type',
-                'Portal Passport status',
-                'Photo Status', 
-                'Docs status'
-            ]
+            required_columns = ['Housemaid ID', 'Current Stage']
+            df = df.dropna(subset=required_columns)
             
-            # Check for missing columns
-            missing_columns = [col for col in required_columns if col not in df.columns]
-            if missing_columns:
-                # Add missing columns with default values
-                for col in missing_columns:
-                    if col in ['Time In Stage', 'RPA try count']:
-                        df[col] = 0
-                    else:
-                        df[col] = 'Not Specified'
-            
-            # Step 3: Clean and standardize data types
             # Handle numeric fields
-            numeric_columns = {
-                'Time In Stage': 0,
-                'RPA try count': 0
-            }
+            df['RPA try count'] = pd.to_numeric(df['RPA try count'], errors='coerce').fillna(0).astype(int)
+            df['Time In Stage'] = pd.to_numeric(df['Time In Stage'], errors='coerce').fillna(0)
             
-            for col, default in numeric_columns.items():
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(default)
-                # Ensure non-negative values
-                df[col] = df[col].clip(lower=0)
-            
-            # Step 4: Standardize text fields
+            # Handle text fields
             text_fields = {
                 'Client Note': 'STANDARD',
                 'Error resolver page?': 'No',
-                'Latest Note': 'No notes',
-                'User': 'Unassigned',
-                'Note Time': 'Not Available',
-                'Last RPA try time': 'Not Available',
+                'Latest Note': '',
+                'User': '',
+                'Note Time': '',
+                'Last RPA try time': '',
                 'Nationality': 'Unknown',
                 'Type': 'Unknown',
                 'Portal Passport status': 'Unknown',
@@ -879,60 +673,28 @@ class DelayedMaidsAnalytics:
             
             for field, default in text_fields.items():
                 if field in df.columns:
-                    # Convert to string and clean
-                    df[field] = df[field].astype(str)
-                    # Replace empty strings, 'nan', and whitespace-only strings with default
-                    df[field] = df[field].replace(['nan', '', ' ', 'NaN', 'None'], default)
-                    df[field] = df[field].str.strip()
+                    df[field] = df[field].astype(str).replace('nan', default).fillna(default)
             
-            # Step 5: Client Note standardization
-            valid_client_notes = ['SUPER_ANGRY_CLIENT', 'PRIORITIZE_VISA', 'AMNESTY', 'STANDARD']
-            df['Client Note'] = df['Client Note'].apply(
-                lambda x: x if x in valid_client_notes else 'STANDARD'
-            )
+            # Calculate delays and severity
+            df['Threshold (in hours)'] = df['Current Stage'].map(TASK_THRESHOLDS).fillna(24)
+            df['Delay (hours)'] = (df['Time In Stage'] - df['Threshold (in hours)']).fillna(0)
             
-            # Step 6: Error resolver standardization
-            df['Error resolver page?'] = df['Error resolver page?'].str.lower()
-            df['Error resolver page?'] = df['Error resolver page?'].apply(
-                lambda x: 'Yes' if x in ['yes', 'y', 'true', '1'] else 'No'
-            )
-            
-            # Step 7: Calculate thresholds and delays
-            df['Threshold (in hours)'] = df['Current Stage'].apply(self.threshold_manager.get_threshold)
-            df['Delay (hours)'] = df.apply(
-                lambda x: max(0, x['Time In Stage'] - x['Threshold (in hours)']), 
-                axis=1
-            )
-            
-            # Step 8: Calculate threshold ratio and severity
             df['Threshold Ratio'] = df['Time In Stage'] / df['Threshold (in hours)']
             df['Severity'] = pd.cut(
                 df['Threshold Ratio'],
                 bins=[0, 1.5, 2, 3, float('inf')],
-                labels=['Low', 'Medium', 'High', 'Critical'],
-                include_lowest=True
+                labels=['Low', 'Medium', 'High', 'Critical']
             ).fillna('Low')
             
-            # Step 9: Priority score calculation with error handling
             df['Priority Score'] = df.apply(self._calculate_priority, axis=1)
-            
-            # Step 10: Calculate total delay per housemaid
             df['Total Delay (hours)'] = df.groupby('Housemaid ID')['Delay (hours)'].transform('sum')
-            
-            # Step 11: Sort by priority
-            df = df.sort_values(['Priority Score', 'Total Delay (hours)'], ascending=[False, False])
-            
-            # Step 12: Round numeric columns for display
-            numeric_display_cols = ['Delay (hours)', 'Total Delay (hours)', 'Time In Stage', 'Threshold Ratio']
-            df[numeric_display_cols] = df[numeric_display_cols].round(2)
             
             return df
             
         except Exception as e:
             print(f"Error in data processing: {str(e)}")
-            raise Exception(f"Failed to process data: {str(e)}")
+            raise
 
-    
     def _calculate_priority(self, row):
         """Calculate priority score with enhanced logic."""
         try:
@@ -962,27 +724,13 @@ class DelayedMaidsAnalytics:
         self.app.layout = html.Div([
             # Enhanced Header with Gradient Background
             dbc.Navbar(
+                
                 dbc.Container([
                     html.Div([
                         html.I(className="fas fa-chart-line me-2"),
                         html.H2("Delayed Cases Analytics", className="text-white mb-0"),
                     ], className="d-flex align-items-center"),
                     html.Div([
-                        # Manage Users button
-                        dbc.Button(
-                            ["Manage Users ", html.I(className="fas fa-users-cog")],
-                            id="open-user-modal",
-                            color="light",
-                            className="me-2"
-                        ),
-                        # Configure Thresholds button
-                        dbc.Button(
-                            ["Configure Thresholds ", html.I(className="fas fa-clock")],
-                            id="open-threshold-modal",
-                            color="light",
-                            className="me-2"
-                        ),
-                        # Upload button
                         dcc.Upload(
                             id='upload-data',
                             children=dbc.Button(
@@ -1067,9 +815,13 @@ class DelayedMaidsAnalytics:
             ])
         ], id="user-management-modal", size="lg"),
 
-        # Add the threshold modal
-        self.create_threshold_modal(),
-
+            # Add a button to open the modal in the navbar
+            dbc.Button(
+                ["Manage Users ", html.I(className="fas fa-users-cog")],
+                id="open-user-modal",
+                color="light",
+                className="me-2"
+            ),
             dbc.Container([
                 # Alert area
                 html.Div(id='alerts-area', className="mb-3"),
@@ -1394,77 +1146,7 @@ class DelayedMaidsAnalytics:
 
     def setup_callbacks(self):
         """Set up enhanced callbacks with new filter functionality."""
-        @self.app.callback(
-            Output("threshold-modal", "is_open"),
-            [
-                Input("open-threshold-modal", "n_clicks"),
-                Input("close-threshold-modal-btn", "n_clicks"),
-                Input("save-thresholds-btn", "n_clicks")
-            ],
-            [State("threshold-modal", "is_open")],
-            prevent_initial_call=True
-        )
-        def toggle_threshold_modal(n1, n2, n3, is_open):
-            if n1 or n2 or n3:
-                return not is_open
-            return is_open
-        
-        @self.app.callback(
-            [Output('threshold-table', 'data'),
-            Output('alerts-area', 'children', allow_duplicate=True)],
-            [
-                Input('reset-thresholds-btn', 'n_clicks'),
-                Input('save-thresholds-btn', 'n_clicks')
-            ],
-            [State('threshold-table', 'data')],
-            prevent_initial_call=True
-        )
-        def manage_thresholds(reset_clicks, save_clicks, current_data):
-                ctx = dash.callback_context
-                if not ctx.triggered:
-                    return dash.no_update, dash.no_update
-        
-                trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-                
-                try:
-                    if trigger_id == 'reset-thresholds-btn':
-                        # Reset to default values
-                        self.threshold_manager = ThresholdManager()
-                        return self.threshold_manager.get_all_thresholds(), dbc.Alert(
-                            "All thresholds reset to default (24 hours)",
-                            color="success",
-                            duration=3000,
-                            is_open=True,
-                            dismissable=True
-                        )
-        
-                    elif trigger_id == 'save-thresholds-btn':
-                        # Update thresholds from table data
-                        new_thresholds = {row['stage']: row['threshold'] for row in current_data}
-                        if self.threshold_manager.bulk_update_thresholds(new_thresholds):
-                            # Reprocess data if we have any loaded
-                            if not self.df.empty:
-                                self.df = self.process_data(self.df)
-                            return current_data, dbc.Alert(
-                                "Thresholds updated successfully",
-                                color="success",
-                                duration=3000,
-                                is_open=True,
-                                dismissable=True
-                            )
-                        else:
-                            raise ValueError("Invalid threshold values")
-        
-                except Exception as e:
-                    return self.threshold_manager.get_all_thresholds(), dbc.Alert(
-                        f"Error updating thresholds: {str(e)}",
-                        color="danger",
-                        duration=3000,
-                        is_open=True,
-                        dismissable=True
-                    )
-                
-                return dash.no_update, dash.no_update
+
         # Callback for opening/closing the modal
         @self.app.callback(
             Output("user-management-modal", "is_open"),
@@ -1669,98 +1351,129 @@ class DelayedMaidsAnalytics:
 
         # Your existing update_dashboard callback
         @self.app.callback(
-    [
-        Output('kpi-cards', 'children'),
-        Output('client-priority-chart', 'figure'),
-        Output('priority-stage-chart', 'figure'),
-        Output('detailed-table', 'data'),
-        Output('detailed-table', 'columns'),
-        Output('stage-filter', 'options'),
-        Output('type-filter', 'options'),
-        Output('nationality-filter', 'options'),
-        Output('last-update', 'children'),
-        Output('alerts-area', 'children')
-    ],
-    [
-        Input('upload-data', 'contents'),
-        Input('apply-filters-btn', 'n_clicks'),
-        Input('distribute-btn', 'n_clicks')
-    ],
-    [
-        State('upload-data', 'filename'),
-        State('stage-filter', 'value'),
-        State('type-filter', 'value'),
-        State('nationality-filter', 'value'),
-        State('client-note-filter', 'value'),
-        State('table-search', 'value'),
-        State('table-sort-field', 'value'),
-        State('records-per-page', 'value'),
-        State('users-to-distribute', 'value'),
-        State('detailed-table', 'data')
-    ]
-)
+            [Output('kpi-cards', 'children'),
+            Output('client-priority-chart', 'figure'),
+            Output('priority-stage-chart', 'figure'),
+            Output('detailed-table', 'data'),
+            Output('detailed-table', 'columns'),
+            Output('stage-filter', 'options'),
+            Output('type-filter', 'options'),
+            Output('nationality-filter', 'options'),
+            Output('last-update', 'children'),
+            Output('alerts-area', 'children', allow_duplicate=True)],
+            [Input('upload-data', 'contents'),
+            Input('apply-filters-btn', 'n_clicks'),
+            Input('distribute-btn', 'n_clicks')],
+            [State('upload-data', 'filename'),
+            State('stage-filter', 'value'),
+            State('type-filter', 'value'),
+            State('nationality-filter', 'value'),
+            State('client-note-filter', 'value'),
+            State('table-search', 'value'),
+            State('table-sort-field', 'value'),
+            State('records-per-page', 'value'),
+            State('users-to-distribute', 'value'),
+            State('detailed-table', 'data')],
+            prevent_initial_call=True  # Add this line
+        )
         def update_dashboard(contents, filter_clicks, distribute_clicks,
-                            filename, stage_filter, type_filter,
-                            nationality_filter, client_note_filter,
-                            search_value, sort_field, records_per_page,
-                            selected_users, table_data):
-            """
-            Comprehensive dashboard update callback handling file uploads, filtering, and data distribution.
-            
-            Returns:
-                tuple: Updated components for the dashboard
-            """
-            # Initialize empty returns for error cases
-            empty_returns = [[], {}, {}, [], [], [], [], [], "", None]
-            
+                      filename, stage_filter, type_filter,
+                      nationality_filter, client_note_filter,
+                      search_value, sort_field, records_per_page,
+                      selected_users, table_data):
+            """Update dashboard with enhanced filtering and sorting."""
             ctx = dash.callback_context
             if not ctx.triggered:
-                return empty_returns
-
+                return [[], {}, {}, [], [], [], [], [], "", None]
+            
             trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
             
             # Handle distribution button click
             if trigger_id == 'distribute-btn':
                 if not selected_users or not table_data:
                     return dash.no_update * 9 + (
-                        dbc.Alert(
-                            "Please select users and ensure there is data to distribute",
-                            color="warning",
-                            dismissable=True
-                        ),
+                        dbc.Alert("Please select users and ensure there is data to distribute",
+                                color="warning", dismissable=True),
                     )
                 
                 try:
                     df = pd.DataFrame(table_data)
                     results = self.user_manager.distribute_data(selected_users, df)
                     
+                    # Process detailed results
                     success_count = sum(1 for r in results.values() 
-                                    if isinstance(r, dict) and r.get("status") == "success")
+                                      if isinstance(r, dict) and r.get("status") == "success")
                     error_count = sum(1 for r in results.values() 
-                                    if isinstance(r, dict) and r.get("status") == "error")
+                                     if isinstance(r, dict) and r.get("status") == "error")
+                    warning_count = sum(1 for r in results.values() 
+                                      if isinstance(r, dict) and r.get("status") == "warning")
+                    
+                    alert_content = []
+                    
+                    # Summary section
+                    summary = [
+                        html.H5("Distribution Results", className="mb-3"),
+                        html.P([
+                            f"Successfully distributed to {success_count} users",
+                            html.Br(),
+                            f"Errors: {error_count}",
+                            html.Br(),
+                            f"Warnings: {warning_count}"
+                        ], className="mb-3")
+                    ]
+                    alert_content.extend(summary)
+                    
+                    # Detailed results section
+                    if error_count > 0 or warning_count > 0:
+                        alert_content.append(html.H6("Detailed Results:", className="mb-2"))
+                        for username, result in results.items():
+                            if isinstance(result, dict):
+                                if result["status"] in ["error", "warning"]:
+                                    alert_content.extend([
+                                        html.Div([
+                                            html.Strong(f"{username}: "),
+                                            result["message"],
+                                            # Add debugging info if available
+                                            html.Details([
+                                                html.Summary("Debug Info"),
+                                                html.Pre(json.dumps(result["debug"], indent=2))
+                                            ]) if "debug" in result else None
+                                        ], className="mb-2")
+                                    ])
+                    
+                    # Determine alert color based on results
+                    if error_count > 0:
+                        alert_color = "danger"
+                    elif warning_count > 0:
+                        alert_color = "warning"
+                    else:
+                        alert_color = "success"
                     
                     alert = dbc.Alert(
-                        [
-                            html.H5("Distribution Results", className="mb-3"),
-                            html.P(f"Successfully distributed to {success_count} users"),
-                            html.P(f"Errors: {error_count}")
-                        ],
-                        color="success" if error_count == 0 else "warning",
+                        alert_content,
+                        color=alert_color,
                         dismissable=True
                     )
                     
                     return dash.no_update * 9 + (alert,)
-                    
+                                
                 except Exception as e:
-                    return dash.no_update * 9 + (
-                        dbc.Alert(
-                            str(e),
-                            color="danger",
-                            dismissable=True
-                        ),
+                    error_alert = dbc.Alert(
+                        [
+                            html.H5("Distribution Error", className="mb-3"),
+                            html.P(str(e)),
+                            html.Details([
+                                html.Summary("Debug Info"),
+                                html.Pre(traceback.format_exc())
+                            ])
+                        ],
+                        color="danger",
+                        dismissable=True
                     )
-
-            # Handle file upload
+                    return dash.no_update * 9 + (error_alert,)
+            # Handle data upload and filtering (existing functionality)
+            empty_returns = [[], {}, {}, [], [], [], [], [], "", None]
+            
             if contents is None:
                 return empty_returns
 
@@ -1770,128 +1483,78 @@ class DelayedMaidsAnalytics:
                 decoded = base64.b64decode(content_string)
                 
                 if filename.endswith('.xlsx'):
-                    # Enhanced Excel reading with proper error handling
-                    df = pd.read_excel(
-                        io.BytesIO(decoded),
-                        engine='openpyxl',
-                        na_values=[
-                            '', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN',
-                            '<NA>', 'N/A', 'NA', 'NULL', 'NaN', 'n/a', 'null'
-                        ],
-                        keep_default_na=True
-                    )
+                    self.df = pd.read_excel(io.BytesIO(decoded))
                 elif filename.endswith('.csv'):
-                    # Enhanced CSV reading
-                    df = pd.read_csv(
-                        io.BytesIO(decoded),
-                        na_values=[
-                            '', '#N/A', '#N/A N/A', '#NA', '-1.#IND', '-1.#QNAN',
-                            '<NA>', 'N/A', 'NA', 'NULL', 'NaN', 'n/a', 'null'
-                        ],
-                        keep_default_na=True
-                    )
+                    self.df = pd.read_csv(io.BytesIO(decoded))
                 else:
                     raise ValueError("Unsupported file format. Please upload an Excel (.xlsx) or CSV file.")
-
-                # Process the data through our enhanced processor
-                self.df = self.process_data(df)
                 
-                # Apply filters if they exist
-                filtered_df = self.df.copy()
-                
-                if stage_filter:
-                    filtered_df = filtered_df[filtered_df['Current Stage'].isin(stage_filter)]
-                if type_filter:
-                    filtered_df = filtered_df[filtered_df['Type'].isin(type_filter)]
-                if nationality_filter:
-                    filtered_df = filtered_df[filtered_df['Nationality'].isin(nationality_filter)]
-                if client_note_filter:
-                    filtered_df = filtered_df[filtered_df['Client Note'].isin(client_note_filter)]
-                
-                # Apply search if it exists
-                if search_value:
-                    search = search_value.lower()
-                    filtered_df = filtered_df[
-                        filtered_df.astype(str).apply(lambda x: x.str.lower()).apply(
-                            lambda x: x.str.contains(search, na=False)
-                        ).any(axis=1)
-                    ]
-
-                # Create visualizations
-                kpi_cards = self.create_kpi_cards(filtered_df)
-                client_priority_fig = self.create_client_priority_chart(filtered_df)
-                priority_stage_fig = self.create_priority_stage_chart(filtered_df)
-
-                # Apply sorting if specified
-                if sort_field:
-                    filtered_df = filtered_df.sort_values(sort_field, ascending=False)
-
-                # Prepare table data
-                table_data = filtered_df.to_dict('records')
-                columns = [{'name': i, 'id': i} for i in filtered_df.columns]
-
-                # Create filter options with counts
-                def create_options_with_counts(column):
-                    value_counts = self.df[column].value_counts()
-                    return [
-                        {'label': f"{x} ({value_counts[x]})", 'value': x}
-                        for x in sorted(self.df[column].unique())
-                    ]
-
-                # Generate filter options
-                stage_options = create_options_with_counts('Current Stage')
-                type_options = create_options_with_counts('Type')
-                nationality_options = create_options_with_counts('Nationality')
-
-                # Create last update timestamp
-                update_time = html.Span([
-                    html.I(className="fas fa-clock me-1"),
-                    f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-                ])
-
-                # Create success message
-                success_alert = dbc.Alert(
-                    [
-                        html.H4("Success", className="alert-heading"),
-                        html.P(f"Successfully processed {len(filtered_df)} records."),
-                        html.Hr(),
-                        html.P(
-                            "Use the filters above to analyze the data.",
-                            className="mb-0"
-                        )
-                    ],
-                    color="success",
-                    dismissable=True
-                )
-
-                return (
-                    kpi_cards,
-                    client_priority_fig,
-                    priority_stage_fig,
-                    table_data,
-                    columns,
-                    stage_options,
-                    type_options,
-                    nationality_options,
-                    update_time,
-                    success_alert
-                )
-
+                self.df = self.process_data(self.df)
             except Exception as e:
-                error_alert = dbc.Alert(
-                    [
-                        html.H4("Error Processing File", className="alert-heading"),
-                        html.P(f"An error occurred while processing your file: {str(e)}"),
-                        html.Hr(),
-                        html.P(
-                            "Please ensure your file is properly formatted and contains the required columns.",
-                            className="mb-0"
-                        )
-                    ],
-                    color="danger",
-                    dismissable=True
-                )
-                return empty_returns[:-1] + [error_alert]
+                return empty_returns[:-1] + [
+                    dbc.Alert(
+                        f"Error processing data: {str(e)}", 
+                        color="danger", 
+                        dismissable=True
+                    )
+                ]
+
+            # Apply filters
+            filtered_df = self.df.copy()
+            
+            if stage_filter:
+                filtered_df = filtered_df[filtered_df['Current Stage'].isin(stage_filter)]
+            if type_filter:
+                filtered_df = filtered_df[filtered_df['Type'].isin(type_filter)]
+            if nationality_filter:
+                filtered_df = filtered_df[filtered_df['Nationality'].isin(nationality_filter)]
+            if client_note_filter:
+                filtered_df = filtered_df[filtered_df['Client Note'].isin(client_note_filter)]
+                
+            # Enhanced search functionality
+            if search_value:
+                search = search_value.lower()
+                filtered_df = filtered_df[
+                    filtered_df.astype(str).apply(lambda x: x.str.lower()).apply(
+                        lambda x: x.str.contains(search, na=False)
+                    ).any(axis=1)
+                ]
+
+            # Create visualizations
+            kpi_cards = self.create_kpi_cards(filtered_df)
+            client_priority_fig = self.create_client_priority_chart(filtered_df)
+            priority_stage_fig = self.create_priority_stage_chart(filtered_df)
+
+            # Enhanced sorting
+            if sort_field:
+                filtered_df = filtered_df.sort_values(sort_field, ascending=False)
+            
+            # Prepare table data with formatted values
+            table_data = filtered_df.to_dict('records')
+            columns = [{'name': i, 'id': i} for i in filtered_df.columns]
+
+            # Create filter options with counts
+            def create_options_with_counts(column):
+                value_counts = self.df[column].value_counts()
+                return [{'label': f"{x} ({value_counts[x]})", 'value': x} 
+                    for x in sorted(self.df[column].unique())]
+
+            stage_options = create_options_with_counts('Current Stage')
+            type_options = create_options_with_counts('Type')
+            nationality_options = create_options_with_counts('Nationality')
+
+            # Update time with enhanced formatting
+            update_time = html.Span([
+                html.I(className="fas fa-clock me-1"),
+                f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            ])
+
+            return (
+                kpi_cards, client_priority_fig, priority_stage_fig,
+                table_data, columns, stage_options, type_options, nationality_options,
+                update_time, None
+            )
+        
 
     def add_custom_css(self):
         """Add comprehensive custom CSS styles."""
