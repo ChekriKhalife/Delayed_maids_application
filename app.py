@@ -643,8 +643,8 @@ class DelayedMaidsAnalytics:
         return fig
     
     
-    def process_data(self, df):
-        """Process the uploaded data with proper handling of all fields."""
+    def process_data(self, df, selected_stage=None, threshold_hours=24):
+        """Process the uploaded data with user-defined threshold."""
         try:
             df = df.copy()
             df.columns = df.columns.str.strip()
@@ -653,41 +653,23 @@ class DelayedMaidsAnalytics:
             df = df.dropna(subset=required_columns)
             
             # Handle numeric fields
-            df['RPA try count'] = pd.to_numeric(df['RPA try count'], errors='coerce').fillna(0).astype(int)
             df['Time In Stage'] = pd.to_numeric(df['Time In Stage'], errors='coerce').fillna(0)
             
-            # Handle text fields
-            text_fields = {
-                'Client Note': 'STANDARD',
-                'Error resolver page?': 'No',
-                'Latest Note': '',
-                'User': '',
-                'Note Time': '',
-                'Last RPA try time': '',
-                'Nationality': 'Unknown',
-                'Type': 'Unknown',
-                'Portal Passport status': 'Unknown',
-                'Photo Status': 'Unknown',
-                'Docs status': 'Unknown'
-            }
+            # Filter for selected stage if provided
+            if selected_stage:
+                df = df[df['Current Stage'] == selected_stage]
             
-            for field, default in text_fields.items():
-                if field in df.columns:
-                    df[field] = df[field].astype(str).replace('nan', default).fillna(default)
-            
-            # Calculate delays and severity
-            df['Threshold (in hours)'] = df['Current Stage'].map(TASK_THRESHOLDS).fillna(24)
+            # Calculate delays using the user-defined threshold
+            df['Threshold (in hours)'] = threshold_hours
             df['Delay (hours)'] = (df['Time In Stage'] - df['Threshold (in hours)']).fillna(0)
             
+            # Calculate threshold ratio and severity
             df['Threshold Ratio'] = df['Time In Stage'] / df['Threshold (in hours)']
             df['Severity'] = pd.cut(
                 df['Threshold Ratio'],
                 bins=[0, 1.5, 2, 3, float('inf')],
                 labels=['Low', 'Medium', 'High', 'Critical']
             ).fillna('Low')
-            
-            df['Priority Score'] = df.apply(self._calculate_priority, axis=1)
-            df['Total Delay (hours)'] = df.groupby('Housemaid ID')['Delay (hours)'].transform('sum')
             
             return df
             
@@ -844,6 +826,42 @@ class DelayedMaidsAnalytics:
                                     className="mb-2"
                                 )
                             ], md=3),
+                            dbc.Row([
+                                dbc.Col([
+                                    html.H5([
+                                        html.I(className="fas fa-filter me-2"),
+                                        "Filters"
+                                    ], className="card-title mb-3"),
+                                ], width=12),
+                                dbc.Col([
+                                    html.Label("Stage", className="mb-2"),
+                                    dcc.Dropdown(
+                                        id='stage-filter',
+                                        placeholder="Select Stage",
+                                        multi=False,  # Changed to single select
+                                        className="mb-2"
+                                    )
+                                ], md=3),
+                                dbc.Col([
+                                    html.Label("Threshold (hours)", className="mb-2"),
+                                    dbc.Input(
+                                        id='threshold-input',
+                                        type="number",
+                                        min=1,
+                                        step=1,
+                                        value=24,  # Default 24 hours
+                                        className="mb-2"
+                                    )
+                                ], md=2),
+                                dbc.Col([
+                                    html.Label("Type", className="mb-2"),
+                                    dcc.Dropdown(
+                                        id='type-filter',
+                                        placeholder="Filter by Type",
+                                        multi=True,
+                                        className="mb-2"
+                                    )
+                                ], md=2),
                             dbc.Col([
                                 dcc.Dropdown(
                                     id='type-filter',
@@ -1350,7 +1368,7 @@ class DelayedMaidsAnalytics:
             return None, None, None, None
 
         # Your existing update_dashboard callback
-        @self.app.callback(
+        @app.callback(
             [Output('kpi-cards', 'children'),
             Output('client-priority-chart', 'figure'),
             Output('priority-stage-chart', 'figure'),
@@ -1366,6 +1384,7 @@ class DelayedMaidsAnalytics:
             Input('distribute-btn', 'n_clicks')],
             [State('upload-data', 'filename'),
             State('stage-filter', 'value'),
+            State('threshold-input', 'value'),  # New threshold input
             State('type-filter', 'value'),
             State('nationality-filter', 'value'),
             State('client-note-filter', 'value'),
@@ -1373,14 +1392,13 @@ class DelayedMaidsAnalytics:
             State('table-sort-field', 'value'),
             State('records-per-page', 'value'),
             State('users-to-distribute', 'value'),
-            State('detailed-table', 'data')],
-            prevent_initial_call=True  # Add this line
+            State('detailed-table', 'data')]
         )
         def update_dashboard(contents, filter_clicks, distribute_clicks,
-                      filename, stage_filter, type_filter,
-                      nationality_filter, client_note_filter,
-                      search_value, sort_field, records_per_page,
-                      selected_users, table_data):
+                            filename, stage_filter, threshold_hours,
+                            type_filter, nationality_filter, client_note_filter,
+                            search_value, sort_field, records_per_page,
+                            selected_users, table_data):
             """Update dashboard with enhanced filtering and sorting."""
             ctx = dash.callback_context
             if not ctx.triggered:
@@ -1392,25 +1410,28 @@ class DelayedMaidsAnalytics:
             if trigger_id == 'distribute-btn':
                 if not selected_users or not table_data:
                     return dash.no_update * 9 + (
-                        dbc.Alert("Please select users and ensure there is data to distribute",
-                                color="warning", dismissable=True),
+                        dbc.Alert(
+                            "Please select users and ensure there is data to distribute",
+                            color="warning",
+                            dismissable=True
+                        ),
                     )
                 
                 try:
                     df = pd.DataFrame(table_data)
                     results = self.user_manager.distribute_data(selected_users, df)
                     
-                    # Process detailed results
+                    # Process results
                     success_count = sum(1 for r in results.values() 
-                                      if isinstance(r, dict) and r.get("status") == "success")
+                                    if isinstance(r, dict) and r.get("status") == "success")
                     error_count = sum(1 for r in results.values() 
-                                     if isinstance(r, dict) and r.get("status") == "error")
+                                    if isinstance(r, dict) and r.get("status") == "error")
                     warning_count = sum(1 for r in results.values() 
-                                      if isinstance(r, dict) and r.get("status") == "warning")
+                                    if isinstance(r, dict) and r.get("status") == "warning")
                     
                     alert_content = []
                     
-                    # Summary section
+                    # Create summary section
                     summary = [
                         html.H5("Distribution Results", className="mb-3"),
                         html.P([
@@ -1423,7 +1444,7 @@ class DelayedMaidsAnalytics:
                     ]
                     alert_content.extend(summary)
                     
-                    # Detailed results section
+                    # Add detailed results if there are errors or warnings
                     if error_count > 0 or warning_count > 0:
                         alert_content.append(html.H6("Detailed Results:", className="mb-2"))
                         for username, result in results.items():
@@ -1432,12 +1453,7 @@ class DelayedMaidsAnalytics:
                                     alert_content.extend([
                                         html.Div([
                                             html.Strong(f"{username}: "),
-                                            result["message"],
-                                            # Add debugging info if available
-                                            html.Details([
-                                                html.Summary("Debug Info"),
-                                                html.Pre(json.dumps(result["debug"], indent=2))
-                                            ]) if "debug" in result else None
+                                            result["message"]
                                         ], className="mb-2")
                                     ])
                     
@@ -1456,24 +1472,18 @@ class DelayedMaidsAnalytics:
                     )
                     
                     return dash.no_update * 9 + (alert,)
-                                
+                    
                 except Exception as e:
-                    error_alert = dbc.Alert(
-                        [
-                            html.H5("Distribution Error", className="mb-3"),
-                            html.P(str(e)),
-                            html.Details([
-                                html.Summary("Debug Info"),
-                                html.Pre(traceback.format_exc())
-                            ])
-                        ],
-                        color="danger",
-                        dismissable=True
+                    return dash.no_update * 9 + (
+                        dbc.Alert(
+                            f"Distribution failed: {str(e)}",
+                            color="danger",
+                            dismissable=True
+                        ),
                     )
-                    return dash.no_update * 9 + (error_alert,)
-            # Handle data upload and filtering (existing functionality)
+
+            # Handle data upload and filtering
             empty_returns = [[], {}, {}, [], [], [], [], [], "", None]
-            
             if contents is None:
                 return empty_returns
 
@@ -1489,71 +1499,84 @@ class DelayedMaidsAnalytics:
                 else:
                     raise ValueError("Unsupported file format. Please upload an Excel (.xlsx) or CSV file.")
                 
-                self.df = self.process_data(self.df)
+                # Process data with selected stage and threshold
+                threshold_hours = threshold_hours or 24  # Default to 24 if not provided
+                self.df = self.process_data(self.df, stage_filter, threshold_hours)
+                
+                # Apply filters
+                filtered_df = self.df.copy()
+                
+                if stage_filter:
+                    filtered_df = filtered_df[filtered_df['Current Stage'] == stage_filter]
+                if type_filter:
+                    filtered_df = filtered_df[filtered_df['Type'].isin(type_filter)]
+                if nationality_filter:
+                    filtered_df = filtered_df[filtered_df['Nationality'].isin(nationality_filter)]
+                if client_note_filter:
+                    filtered_df = filtered_df[filtered_df['Client Note'].isin(client_note_filter)]
+                
+                # Enhanced search functionality
+                if search_value:
+                    search = search_value.lower()
+                    filtered_df = filtered_df[
+                        filtered_df.astype(str).apply(lambda x: x.str.lower()).apply(
+                            lambda x: x.str.contains(search, na=False)
+                        ).any(axis=1)
+                    ]
+
+                # Create visualizations
+                kpi_cards = self.create_kpi_cards(filtered_df)
+                client_priority_fig = self.create_client_priority_chart(filtered_df)
+                priority_stage_fig = self.create_priority_stage_chart(filtered_df)
+
+                # Sort data if requested
+                if sort_field:
+                    filtered_df = filtered_df.sort_values(sort_field, ascending=False)
+                
+                # Prepare table data
+                table_data = filtered_df.to_dict('records')
+                columns = [{'name': i, 'id': i} for i in filtered_df.columns]
+
+                # Create filter options with counts
+                def create_options_with_counts(column):
+                    value_counts = self.df[column].value_counts()
+                    return [{'label': f"{x} ({value_counts[x]})", 'value': x} 
+                        for x in sorted(self.df[column].unique())]
+
+                stage_options = create_options_with_counts('Current Stage')
+                type_options = create_options_with_counts('Type')
+                nationality_options = create_options_with_counts('Nationality')
+
+                # Update time with enhanced formatting
+                update_time = html.Span([
+                    html.I(className="fas fa-clock me-1"),
+                    f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                ])
+
+                return (
+                    kpi_cards,
+                    client_priority_fig,
+                    priority_stage_fig,
+                    table_data,
+                    columns,
+                    stage_options,
+                    type_options,
+                    nationality_options,
+                    update_time,
+                    None
+                )
+                
             except Exception as e:
+                error_msg = f"Error processing data: {str(e)}"
+                print(error_msg)  # For debugging
                 return empty_returns[:-1] + [
                     dbc.Alert(
-                        f"Error processing data: {str(e)}", 
-                        color="danger", 
+                        error_msg,
+                        color="danger",
                         dismissable=True
                     )
                 ]
 
-            # Apply filters
-            filtered_df = self.df.copy()
-            
-            if stage_filter:
-                filtered_df = filtered_df[filtered_df['Current Stage'].isin(stage_filter)]
-            if type_filter:
-                filtered_df = filtered_df[filtered_df['Type'].isin(type_filter)]
-            if nationality_filter:
-                filtered_df = filtered_df[filtered_df['Nationality'].isin(nationality_filter)]
-            if client_note_filter:
-                filtered_df = filtered_df[filtered_df['Client Note'].isin(client_note_filter)]
-                
-            # Enhanced search functionality
-            if search_value:
-                search = search_value.lower()
-                filtered_df = filtered_df[
-                    filtered_df.astype(str).apply(lambda x: x.str.lower()).apply(
-                        lambda x: x.str.contains(search, na=False)
-                    ).any(axis=1)
-                ]
-
-            # Create visualizations
-            kpi_cards = self.create_kpi_cards(filtered_df)
-            client_priority_fig = self.create_client_priority_chart(filtered_df)
-            priority_stage_fig = self.create_priority_stage_chart(filtered_df)
-
-            # Enhanced sorting
-            if sort_field:
-                filtered_df = filtered_df.sort_values(sort_field, ascending=False)
-            
-            # Prepare table data with formatted values
-            table_data = filtered_df.to_dict('records')
-            columns = [{'name': i, 'id': i} for i in filtered_df.columns]
-
-            # Create filter options with counts
-            def create_options_with_counts(column):
-                value_counts = self.df[column].value_counts()
-                return [{'label': f"{x} ({value_counts[x]})", 'value': x} 
-                    for x in sorted(self.df[column].unique())]
-
-            stage_options = create_options_with_counts('Current Stage')
-            type_options = create_options_with_counts('Type')
-            nationality_options = create_options_with_counts('Nationality')
-
-            # Update time with enhanced formatting
-            update_time = html.Span([
-                html.I(className="fas fa-clock me-1"),
-                f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-            ])
-
-            return (
-                kpi_cards, client_priority_fig, priority_stage_fig,
-                table_data, columns, stage_options, type_options, nationality_options,
-                update_time, None
-            )
         
 
     def add_custom_css(self):
