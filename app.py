@@ -1,37 +1,190 @@
 import dash
-from dash import html, dcc, dash_table, Input, Output, State
-import dash_bootstrap_components as dbc
+from dash import dcc, html, Input, Output, State, dash_table
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
-import numpy as np 
 import base64
 import io
+import dash_bootstrap_components as dbc
+from typing import List, Dict, Any
 import gspread
 import os
 from oauth2client.service_account import ServiceAccountCredentials
 from dataclasses import dataclass
-from typing import Dict, Optional
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 import json
 import traceback
 
+# Initialize the Dash app with a modern Bootstrap theme
+app = dash.Dash(__name__, 
+    external_stylesheets=[
+        dbc.themes.BOOTSTRAP,
+        'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css'
+    ]
+)
+server = app.server  # Expose the Flask server for deployment
+# Custom CSS for enhanced visual design
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>
+            /* Modern color palette */
+            :root {
+                --primary-color: #2C3E50;
+                --secondary-color: #34495E;
+                --accent-color: #3498DB;
+                --success-color: #27AE60;
+                --warning-color: #F39C12;
+                --danger-color: #E74C3C;
+                --light-bg: #F8F9FA;
+                --dark-bg: #343A40;
+            }
+            /* Accordion Enhancements */
+                .accordion-button {
+                    background-color: var(--light-bg) !important;
+                    border-radius: 12px !important;
+                    padding: 1rem 1.5rem !important;
+                    font-size: 1.1rem !important;
+                    font-weight: 500 !important;
+                    color: var(--primary-color) !important;
+                    box-shadow: none !important;
+                }
 
+                .accordion-button:not(.collapsed) {
+                    background-color: white !important;
+                    color: var(--accent-color) !important;
+                }
+
+                .accordion-item {
+                    border: 1px solid #dee2e6 !important;
+                    border-radius: 12px !important;
+                    margin-bottom: 1rem !important;
+                    overflow: hidden !important;
+                }
+
+                .accordion-body {
+                    padding: 1.5rem !important;
+                }
+            /* Enhanced Typography */
+            body {
+                font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+                background-color: var(--light-bg);
+                color: var(--primary-color);
+            }
+            
+            /* Card Enhancements */
+            .dash-card {
+                border-radius: 12px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                transition: transform 0.2s, box-shadow 0.2s;
+                background: white;
+                margin-bottom: 1.5rem;
+            }
+            
+            .dash-card:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            }
+            
+            /* Metric Cards */
+            .metric-card {
+                padding: 1.5rem;
+                text-align: center;
+                border-radius: 12px;
+                background: white;
+            }
+            
+            .metric-card i {
+                font-size: 2rem;
+                margin-bottom: 1rem;
+            }
+            
+            .metric-value {
+                font-size: 2rem;
+                font-weight: bold;
+                margin-bottom: 0.5rem;
+            }
+            
+            .metric-label {
+                color: var(--secondary-color);
+                font-size: 0.9rem;
+            }
+            
+            /* Enhanced Tables */
+            .dash-table-container {
+                border-radius: 8px;
+                overflow: hidden;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            
+            .dash-spreadsheet-container .dash-spreadsheet-inner td,
+            .dash-spreadsheet-container .dash-spreadsheet-inner th {
+                padding: 12px 16px !important;
+                border-color: #e9ecef !important;
+            }
+            
+            /* Filter Panels */
+            .filter-panel {
+                background: white;
+                padding: 1.5rem;
+                border-radius: 12px;
+                margin-bottom: 1.5rem;
+            }
+            
+            /* Upload Zone */
+            .upload-zone {
+                border: 2px dashed #dee2e6;
+                border-radius: 12px;
+                padding: 2rem;
+                text-align: center;
+                background: white;
+                transition: border-color 0.2s;
+            }
+            
+            .upload-zone:hover {
+                border-color: var(--accent-color);
+            }
+            
+            /* Status Badges */
+            .status-badge {
+                padding: 0.25rem 0.75rem;
+                border-radius: 50px;
+                font-size: 0.85rem;
+                font-weight: 500;
+            }
+            
+            /* Animations */
+            .fade-in {
+                animation: fadeIn 0.3s ease-in;
+            }
+            
+            @keyframes fadeIn {
+                from { opacity: 0; }
+                to { opacity: 1; }
+            }
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>
+'''
+
+# Define User and UserManager classes for Manage Users functionality
 @dataclass
 class User:
     name: str
     google_sheet_id: str
     active: bool = True
     workload: int = 0
-
-@dataclass
-class User:
-    name: str
-    google_sheet_id: str
-    active: bool = True
-    workload: int = 0  # Track how many tasks assigned
 
 class UserManager:
     def __init__(self):
@@ -66,682 +219,144 @@ class UserManager:
             )
         }
         self.setup_google_sheets()
-    
-    
-    def validate_sheet_access(self, sheet_id):
-        """Validate that we can access and modify the sheet"""
-        try:
-            sheet = self.client.open_by_key(sheet_id).sheet1
-            # Try to write something to verify we have write access
-            sheet.update_cell(1, 1, "test")
-            sheet.clear()  # Clear the test
-            return True
-        except Exception as e:
-            print(f"Sheet validation error: {str(e)}")
-            return False
 
-    def extract_sheet_id(self, sheet_url: str) -> str:
-        """Extract Google Sheet ID from URL."""
-        try:
-            if not sheet_url:
-                raise ValueError("No URL provided")
-                
-            # Handle different URL formats
-            if '/spreadsheets/d/' in sheet_url:
-                sheet_id = sheet_url.split('/spreadsheets/d/')[1].split('/')[0]
-            elif 'key=' in sheet_url:
-                sheet_id = sheet_url.split('key=')[1].split('&')[0]
-            elif len(sheet_url.strip()) == 44:  # Direct sheet ID
-                sheet_id = sheet_url.strip()
-            else:
-                raise ValueError("Invalid Google Sheet URL format")
-                
-            # Validate ID format (basic check)
-            if not sheet_id or len(sheet_id) != 44:
-                raise ValueError("Invalid sheet ID format")
-                
-            return sheet_id
-        except Exception as e:
-            print(f"Error extracting sheet ID: {str(e)}")
-            raise ValueError(f"Could not extract sheet ID: {str(e)}")
-        
     def setup_google_sheets(self):
-        """Initialize Google Sheets connection"""
-        scope = ['https://spreadsheets.google.com/feeds',
-                'https://www.googleapis.com/auth/drive']
-        
-        # Add your credentials file path
-        # Load credentials from environment variable
-        service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-        if not service_account_json:
-            raise ValueError("Environment variable GOOGLE_SERVICE_ACCOUNT_JSON is missing")
-        
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(
-            json.loads(service_account_json), scope
-        )
+        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        credentials_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_PATH")
+        if not credentials_path or not os.path.exists(credentials_path):
+            raise ValueError("Environment variable GOOGLE_SERVICE_ACCOUNT_JSON_PATH is missing or file does not exist")
+        creds = ServiceAccountCredentials.from_json_keyfile_name(credentials_path, scope)
         self.client = gspread.authorize(creds)
 
-
-    def add_user(self, username: str, name: str, sheet_id: str) -> bool:
-        """Add a new user"""
-        try:
-            # First validate sheet access
-            if not self.validate_sheet_access(sheet_id):
-                raise Exception("Cannot access or modify sheet. Please check sharing settings.")
-                
-            self.users[username] = User(name=name, google_sheet_id=sheet_id)
-            self._save_user_config()
-            return True
-        except Exception as e:
-            print(f"Error adding user: {str(e)}")
-            return False
-
-    def update_user(self, username: str, name: str = None, sheet_id: str = None) -> bool:
-        """Update user details"""
-        if username not in self.users:
-            return False
-        
-        try:
-            if sheet_id:
-                self.client.open_by_key(sheet_id)
-                self.users[username].google_sheet_id = sheet_id
-            if name:
-                self.users[username].name = name
-            self._save_user_config()
-            return True
-        except Exception as e:
-            print(f"Error updating user: {str(e)}")
-            return False
-
-    def delete_user(self, username: str) -> bool:
-        """Delete a user completely from the system"""
-        try:
-            if username in self.users:
-                del self.users[username]
-                self._save_user_config()
-                return True
-            return False
-        except Exception as e:
-            print(f"Error deleting user: {str(e)}")
-            return False
     def distribute_data(self, usernames: list, data: pd.DataFrame) -> dict:
-        """
-        Distribute data evenly among users with enhanced error handling and debugging
-        
-        Returns:
-            dict: Detailed results for each user including success/failure status and debugging info
-        """
+        """Distribute data evenly among users."""
         results = {}
-        debug_info = {}
-        
-        try:
-            # Input validation with detailed error messages
-            if not usernames:
-                return {
-                    "error": "No users selected",
-                    "debug": "The usernames list is empty"
-                }
-            
-            if data.empty:
-                return {
-                    "error": "No data to distribute",
-                    "debug": "The input DataFrame is empty"
-                }
-                
-            # Reset workload counters
-            for user in self.users.values():
-                user.workload = 0
+        for username in usernames:
+            if username in self.users:
+                sheet = self.client.open_by_key(self.users[username].google_sheet_id).sheet1
+                sheet.clear()
+                sheet.update([data.columns.values.tolist()] + data.values.tolist())
+                results[username] = {"status": "success", "message": f"Data distributed to {username}"}
+            else:
+                results[username] = {"status": "error", "message": f"User {username} not found"}
+        return results
 
-            # Calculate distribution metrics
-            total_records = len(data)
-            base_records_per_user = total_records // len(usernames)
-            extra_records = total_records % len(usernames)
-            
-            debug_info["distribution_plan"] = {
-                "total_records": total_records,
-                "base_records_per_user": base_records_per_user,
-                "extra_records": extra_records,
-                "users_count": len(usernames)
-            }
+# Initialize UserManager
+user_manager = UserManager()
 
-            start_idx = 0
-            for username in usernames:
-                user_debug = {
-                    "username": username,
-                    "steps": []
-                }
-                
-                # Validate user existence
-                if username not in self.users:
-                    results[username] = {
-                        "status": "error",
-                        "message": "User not found in system",
-                        "debug": f"Username '{username}' not found in self.users dictionary"
-                    }
-                    continue
-
-                # Calculate records for this user
-                records_for_user = base_records_per_user
-                if extra_records > 0:
-                    records_for_user += 1
-                    extra_records -= 1
-
-                end_idx = start_idx + records_for_user
-                user_data = data.iloc[start_idx:end_idx]
-                start_idx = end_idx
-                
-                user_debug["steps"].append({
-                    "step": "data_slice",
-                    "start_idx": start_idx,
-                    "end_idx": end_idx,
-                    "records_assigned": len(user_data)
-                })
-
-                # Update the user's Google Sheet
-                try:
-                    # Access sheet
-                    sheet = self.client.open_by_key(self.users[username].google_sheet_id).sheet1
-                    user_debug["steps"].append({
-                        "step": "sheet_access",
-                        "sheet_id": self.users[username].google_sheet_id,
-                        "status": "success"
-                    })
-                    
-                    # Clear sheet
-                    sheet.clear()
-                    user_debug["steps"].append({
-                        "step": "sheet_clear",
-                        "status": "success"
-                    })
-                    
-                    if not user_data.empty:
-                        # Update headers
-                        headers = user_data.columns.tolist()
-                        sheet.update('A1', [headers])
-                        user_debug["steps"].append({
-                            "step": "headers_update",
-                            "headers_count": len(headers),
-                            "status": "success"
-                        })
-                        
-                        # Update data
-                        values = user_data.values.tolist()
-                        if values:
-                            sheet.update('A2', values)
-                            user_debug["steps"].append({
-                                "step": "data_update",
-                                "rows_updated": len(values),
-                                "status": "success"
-                            })
-                        
-                        # Update workload counter
-                        self.users[username].workload = len(values)
-                        
-                        results[username] = {
-                            "status": "success",
-                            "message": f"Successfully assigned {len(values)} tasks",
-                            "debug": user_debug
-                        }
-                    else:
-                        results[username] = {
-                            "status": "warning",
-                            "message": "No tasks assigned",
-                            "debug": user_debug
-                        }
-
-                except Exception as e:
-                    error_details = str(e)
-                    user_debug["steps"].append({
-                        "step": "error",
-                        "error_message": error_details,
-                        "error_type": type(e).__name__
-                    })
-                    
-                    results[username] = {
-                        "status": "error",
-                        "message": f"Failed to update sheet: {error_details}",
-                        "debug": user_debug
-                    }
-
-            self._save_user_config()  # Save updated workload info
-            debug_info["final_results"] = results
-            return results
-
-        except Exception as e:
-            return {
-                "error": f"Distribution failed: {str(e)}",
-                "debug": {
-                    "error_type": type(e).__name__,
-                    "error_details": str(e),
-                    "traceback": traceback.format_exc()
-                }
-            }
-    def _save_user_config(self):
-        """Save user configuration to a JSON file"""
-        config = {
-            username: {
-                "name": user.name,
-                "sheet_id": user.google_sheet_id,
-                "active": user.active,
-                "workload": user.workload
-            }
-            for username, user in self.users.items()
-        }
-        with open('user_config.json', 'w') as f:
-            json.dump(config, f, indent=2)
-
-    def _load_user_config(self):
-        """Load user configuration from JSON file"""
-        try:
-            with open('user_config.json', 'r') as f:
-                config = json.load(f)
-                self.users = {
-                    username: User(
-                        name=data["name"],
-                        google_sheet_id=data["sheet_id"],
-                        active=data["active"],
-                        workload=data.get("workload", 0)
-                    )
-                    for username, data in config.items()
-                }
-        except FileNotFoundError:
-            # Use default configuration if file doesn't exist
-            pass
-
-
-class DelayedMaidsAnalytics:
-    def __init__(self):
-        self.app = dash.Dash(
-            __name__,
-            external_stylesheets=[
-                dbc.themes.FLATLY,
-                'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css'
-            ],
-            title="Delayed Cases Analytics",
-            prevent_initial_callbacks='initial_duplicate'  # Add this line
-        )
-        self.server = self.app.server 
-        self.df = pd.DataFrame()
-        self.user_manager = UserManager()
-        
-    def create_kpi_cards(self, df):
-        """Create KPI cards with metrics."""
-        total_cases = len(df)
-        if total_cases == 0:
-            return [
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardBody([
-                            html.H3("0", className="text-primary mb-1"),
-                            html.P("Total Delayed Cases", className="mb-1"),
-                            html.Div([
-                                html.I(className="fas fa-users me-2"),
-                                html.Span("No data available")
-                            ], className="text-muted small")
-                        ])
-                    ], className="border-start border-primary border-4 h-100")
-                ], width=3) for _ in range(4)
-            ]
-        
-        critical_cases = len(df[df['Severity'] == 'Critical'])
-        angry_clients = len(df[df['Client Note'] == 'SUPER_ANGRY_CLIENT'])
-        avg_delay = df['Delay (hours)'].mean()
-        highest_priority = df['Priority Score'].max()
-        
-        cards = [
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H3([
-                            f"{total_cases:,}",
-                            html.Span("cases", className="fs-6 ms-2 text-muted")
-                        ], className="text-primary mb-1"),
-                        html.P("Total Delayed Cases", className="mb-1"),
-                        html.Div([
-                            html.I(className="fas fa-users me-2"),
-                            html.Span(f"{(critical_cases/total_cases*100):.1f}% Critical")
-                        ], className="text-muted small")
-                    ])
-                ], className="border-start border-primary border-4 h-100")
-            ], width=3),
-            
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H3([
-                            f"{angry_clients:,}",
-                            html.Span("clients", className="fs-6 ms-2 text-muted")
-                        ], className="text-danger mb-1"),
-                        html.P("Super Angry Clients", className="mb-1"),
-                        html.Div([
-                            html.I(className="fas fa-exclamation-circle me-2"),
-                            html.Span(f"{(angry_clients/total_cases*100):.1f}% of Total")
-                        ], className="text-danger small")
-                    ])
-                ], className="border-start border-danger border-4 h-100")
-            ], width=3),
-            
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H3([
-                            f"{avg_delay:.1f}",
-                            html.Span("hours", className="fs-6 ms-2 text-muted")
-                        ], className="text-warning mb-1"),
-                        html.P("Average Delay", className="mb-1"),
-                        html.Div([
-                            html.I(className="fas fa-clock me-2"),
-                            html.Span("Per Case")
-                        ], className="text-warning small")
-                    ])
-                ], className="border-start border-warning border-4 h-100")
-            ], width=3),
-            
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H3([
-                            f"{critical_cases:,}",
-                            html.Span("cases", className="fs-6 ms-2 text-muted")
-                        ], className="text-danger mb-1"),
-                        html.P("Critical Cases", className="mb-1"),
-                        html.Div([
-                            html.I(className="fas fa-exclamation-triangle me-2"),
-                            html.Span(f"Highest Priority: {int(highest_priority)}")
-                        ], className="text-danger small")
-                    ])
-                ], className="border-start border-danger border-4 h-100")
-            ], width=3)
-        ]
-        
-        return cards
-
-    def create_client_priority_chart(self, df):
-        """Create enhanced client priority distribution chart."""
-        priority_metrics = df.groupby('Client Note').agg({
-            'Delay (hours)': ['mean', 'count', 'sum'],
-            'Priority Score': 'mean'
-        }).reset_index()
-        
-        priority_metrics.columns = ['Client Note', 'Avg Delay', 'Count', 'Total Delay', 'Avg Priority']
-        
-        # Define priority order and colors
-        priority_order = ['SUPER_ANGRY_CLIENT', 'PRIORITIZE_VISA', 'AMNESTY', 'STANDARD']
-        priority_colors = {
-            'SUPER_ANGRY_CLIENT': '#d32f2f',
-            'PRIORITIZE_VISA': '#f57c00',
-            'AMNESTY': '#388e3c',
-            'STANDARD': '#1976d2'
-        }
-        
-        priority_metrics['Client Note'] = pd.Categorical(
-            priority_metrics['Client Note'],
-            categories=priority_order,
-            ordered=True
-        )
-        priority_metrics = priority_metrics.sort_values('Client Note')
-        
-        fig = go.Figure()
-        
-        fig.add_trace(go.Bar(
-            name='Average Delay',
-            x=priority_metrics['Client Note'],
-            y=priority_metrics['Avg Delay'],
-            text=[f'Cases: {int(x)}' for x in priority_metrics['Count']],
-            textposition='auto',
-            marker_color=[priority_colors.get(x, '#1976d2') for x in priority_metrics['Client Note']],
-            hovertemplate=(
-                '<b>%{x}</b><br>' +
-                'Average Delay: %{y:.1f} hours<br>' +
-                '%{text}<br>' +
-                'Total Delay: %{customdata[0]:.0f} hours<br>' +
-                'Avg Priority Score: %{customdata[1]:.0f}<br>' +
-                '<extra></extra>'
-            ),
-            customdata=np.column_stack((
-                priority_metrics['Total Delay'],
-                priority_metrics['Avg Priority']
-            ))
-        ))
-        
-        # Fixed layout to avoid duplicate yaxis
-        fig.update_layout(
-            title=None,
-            xaxis_title="Client Priority Level",
-            yaxis_title="Average Delay (hours)",
-            showlegend=False,
-            height=300,
-            margin=dict(l=20, r=20, t=20, b=20),
-            plot_bgcolor='white',
-            paper_bgcolor='white'
-        )
-        
-        # Update axes separately
-        fig.update_xaxes(
-            showgrid=False,
-            showline=True,
-            linecolor='rgb(204, 204, 204)',
-            linewidth=2,
-            ticks='outside',
-            tickfont=dict(size=12)
-        )
-        
-        fig.update_yaxes(
-            showgrid=True,
-            gridcolor='rgb(204, 204, 204)',
-            showline=True,
-            linecolor='rgb(204, 204, 204)',
-            linewidth=2,
-            ticks='outside',
-            tickfont=dict(size=12)
-        )
-        
-        return fig
-
-    def create_priority_stage_chart(self, df):
-        """Create enhanced priority stage distribution chart."""
-        if len(df) == 0:
-            return go.Figure()
-        
-        pivot_data = pd.crosstab(
-            df['Current Stage'],
-            df['Client Note']
-        ).fillna(0)
-        
-        total_cases = pivot_data.sum(axis=1)
-        pivot_data = pivot_data.loc[total_cases.sort_values(ascending=True).index]
-        pivot_data = pivot_data.tail(10)
-        
-        colors = {
-            'SUPER_ANGRY_CLIENT': '#d32f2f',
-            'PRIORITIZE_VISA': '#f57c00',
-            'AMNESTY': '#388e3c',
-            'STANDARD': '#1976d2'
-        }
-        
-        fig = go.Figure()
-        
-        for client_type in pivot_data.columns:
-            fig.add_trace(go.Bar(
-                name=client_type,
-                y=pivot_data.index,
-                x=pivot_data[client_type],
-                orientation='h',
-                marker_color=colors.get(client_type, '#1976d2'),
-                hovertemplate=(
-                    '<b>%{y}</b><br>' +
-                    f'{client_type}<br>' +
-                    'Number of Cases: %{x}<br>' +
-                    '<extra></extra>'
+app.layout = dbc.Container([
+    # Header section
+    dbc.Row([
+        dbc.Col([
+            html.Div([
+                html.H1("Housemaid Monitoring Dashboard", 
+                        className="display-4 mb-4 text-primary"),
+                html.P("Upload your data file to begin analysis", 
+                       className="lead text-muted")
+            ], className="text-center my-4")
+        ])
+    ]),
+    
+    # File upload section
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dcc.Upload(
+                    id='upload-data',
+                    children=html.Div([
+                        html.I(className="fas fa-cloud-upload-alt fa-2x mb-2"),
+                        html.Br(),
+                        'Drag and Drop or ',
+                        html.A('Select a File', className="text-primary")
+                    ]),
+                    style={
+                        'width': '100%',
+                        'height': '120px',
+                        'lineHeight': '30px',
+                        'borderWidth': '2px',
+                        'borderStyle': 'dashed',
+                        'borderRadius': '10px',
+                        'textAlign': 'center',
+                        'padding': '20px',
+                        'backgroundColor': '#fafafa'
+                    },
+                    multiple=False
                 )
-            ))
-        
-        # Fixed layout to avoid duplicate yaxis
-        fig.update_layout(
-            title=None,
-            barmode='stack',
-            height=400,
-            margin=dict(l=20, r=20, t=20, b=20),
-            legend_title="Client Priority",
-            xaxis_title="Number of Cases",
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
-            ),
-            showlegend=True,
-            plot_bgcolor='white',
-            paper_bgcolor='white'
-        )
-        
-        # Update axes separately
-        fig.update_xaxes(
-            showgrid=True,
-            gridcolor='rgb(204, 204, 204)',
-            showline=True,
-            linecolor='rgb(204, 204, 204)',
-            linewidth=2,
-            ticks='outside'
-        )
-        
-        fig.update_yaxes(
-            categoryorder='total ascending',
-            showgrid=False,
-            showline=True,
-            linecolor='rgb(204, 204, 204)',
-            linewidth=2,
-            ticks='outside',
-            tickfont=dict(size=10),
-            tickangle=0
-        )
-        
-        return fig
+            ], className="mb-4", style=custom_styles['filter-card'])
+        ])
+    ]),
     
-    
-    def process_data(self, df):
-        """Process the uploaded data with proper handling of all fields."""
-        try:
-            df = df.copy()
-            df.columns = df.columns.str.strip()
-            
-            required_columns = ['Housemaid ID', 'Current Stage']
-            df = df.dropna(subset=required_columns)
-            
-            # Handle numeric fields
-            df['RPA try count'] = pd.to_numeric(df['RPA try count'], errors='coerce').fillna(0).astype(int)
-            df['Time In Stage'] = pd.to_numeric(df['Time In Stage'], errors='coerce').fillna(0)
-            
-            # Handle text fields
-            text_fields = {
-                'Client Note': 'STANDARD',
-                'Error resolver page?': 'No',
-                'Latest Note': '',
-                'User': '',
-                'Note Time': '',
-                'Last RPA try time': '',
-                'Nationality': 'Unknown',
-                'Type': 'Unknown',
-                'Portal Passport status': 'Unknown',
-                'Photo Status': 'Unknown',
-                'Docs status': 'Unknown'
-            }
-            
-            for field, default in text_fields.items():
-                if field in df.columns:
-                    df[field] = df[field].astype(str).replace('nan', default).fillna(default)
-            
-            # Calculate delays and severity
-            df['Threshold (in hours)'] = df['Current Stage'].map(TASK_THRESHOLDS).fillna(24)
-            df['Delay (hours)'] = (df['Time In Stage'] - df['Threshold (in hours)']).fillna(0)
-            
-            df['Threshold Ratio'] = df['Time In Stage'] / df['Threshold (in hours)']
-            df['Severity'] = pd.cut(
-                df['Threshold Ratio'],
-                bins=[0, 1.5, 2, 3, float('inf')],
-                labels=['Low', 'Medium', 'High', 'Critical']
-            ).fillna('Low')
-            
-            df['Priority Score'] = df.apply(self._calculate_priority, axis=1)
-            df['Total Delay (hours)'] = df.groupby('Housemaid ID')['Delay (hours)'].transform('sum')
-            
-            return df
-            
-        except Exception as e:
-            print(f"Error in data processing: {str(e)}")
-            raise
-
-    def _calculate_priority(self, row):
-        """Calculate priority score with enhanced logic."""
-        try:
-            base_score = row['Threshold Ratio'] * 100
-            
-            multiplier = 1.0
-            if row['Client Note'] == 'SUPER_ANGRY_CLIENT':
-                multiplier = 2.5
-            elif row['Client Note'] == 'PRIORITIZE_VISA':
-                multiplier = 1.8
-            elif row['Client Note'] == 'AMNESTY':
-                multiplier = 1.5
-            
-            if str(row['Error resolver page?']).lower() == 'yes':
-                multiplier *= 1.3
-            
-            if row['RPA try count'] > 3:
-                multiplier *= 1.2
-                
-            return round(base_score * multiplier)
-            
-        except Exception:
-            return 0
-
-    def create_layout(self):
-        """Create enhanced layout with improved design and filter controls."""
-        self.app.layout = html.Div([
-            # Enhanced Header with Gradient Background
-            dbc.Navbar(
-                
-                dbc.Container([
-                    html.Div([
-                        html.I(className="fas fa-chart-line me-2"),
-                        html.H2("Delayed Cases Analytics", className="text-white mb-0"),
-                    ], className="d-flex align-items-center"),
-                    html.Div([
-                        dcc.Upload(
-                            id='upload-data',
-                            children=dbc.Button(
-                                ["Upload Excel ", html.I(className="fas fa-upload ms-1")],
-                                color="light",
+    # Combined Manage Users and Current Users Accordion
+    dbc.Accordion([
+        dbc.AccordionItem(
+            [
+                dbc.CardBody([
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Username", className="font-weight-bold mb-2"),
+                            dbc.Input(id='input-username', placeholder="Enter username", type="text", className="mb-3")
+                        ], md=4),
+                        dbc.Col([
+                            html.Label("Full Name", className="font-weight-bold mb-2"),
+                            dbc.Input(id='input-fullname', placeholder="Enter full name", type="text", className="mb-3")
+                        ], md=4),
+                        dbc.Col([
+                            html.Label("Google Sheet ID", className="font-weight-bold mb-2"),
+                            dbc.Input(id='input-sheet-id', placeholder="Enter Google Sheet ID", type="text", className="mb-3")
+                        ], md=4)
+                    ]),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Button(
+                                html.Span([
+                                    html.I(className="fas fa-plus me-2"),
+                                    "Add User"
+                                ]),
+                                id='add-user',
+                                color="success",
                                 className="me-2"
                             ),
-                            multiple=False
-                        ),
-                        html.Span(id='last-update', className="text-white ms-2 small")
-                    ], className="d-flex align-items-center")
-                ]),
-                color="primary",
-                dark=True,
-                className="mb-3 shadow-sm",
-                style={'background': 'linear-gradient(135deg, #1976d2 0%, #2196f3 100%)'}
-            ),
-            # Add this to your create_layout method, after the navbar
-           dbc.Modal([
-            dbc.ModalHeader("User Management"),
-            dbc.ModalBody([
-                # User List Table
-                html.Div([
-                    html.H6("Current Users", className="mb-3"),
+                            dbc.Button(
+                                html.Span([
+                                    html.I(className="fas fa-edit me-2"),
+                                    "Update User"
+                                ]),
+                                id='update-user',
+                                color="primary",
+                                className="me-2"
+                            ),
+                            dbc.Button(
+                                html.Span([
+                                    html.I(className="fas fa-trash me-2"),
+                                    "Delete User"
+                                ]),
+                                id='delete-user',
+                                color="danger"
+                            )
+                        ], className="text-end mt-3")
+                    ]),
+                    html.Div(id='user-management-results', className="mt-3"),
                     dash_table.DataTable(
-                        id='user-management-table',
+                        id='user-table',
                         columns=[
                             {'name': 'Username', 'id': 'username', 'type': 'text'},
-                            {'name': 'Display Name', 'id': 'name', 'type': 'text'},
-                            {'name': 'Sheet ID', 'id': 'sheet_id', 'type': 'text'},
+                            {'name': 'Name', 'id': 'name', 'type': 'text'},
+                            {'name': 'Google Sheet ID', 'id': 'google_sheet_id', 'type': 'text'},
                             {'name': 'Status', 'id': 'status', 'type': 'text'},
-                            {'name': 'Tasks', 'id': 'workload', 'type': 'numeric'}
+                            {'name': 'Workload', 'id': 'workload', 'type': 'numeric'}
                         ],
-                        data=[],
+                        data=[
+                            {
+                                'username': username,
+                                'name': user.name,
+                                'google_sheet_id': user.google_sheet_id,
+                                'status': 'Active' if user.active else 'Inactive',
+                                'workload': user.workload
+                            }
+                            for username, user in user_manager.users.items()
+                        ],
+                        row_selectable='single',
+                        selected_rows=[],
                         style_table={'overflowX': 'auto'},
                         style_cell={
                             'textAlign': 'left',
@@ -751,1183 +366,977 @@ class DelayedMaidsAnalytics:
                             'backgroundColor': '#f8f9fa',
                             'fontWeight': 'bold'
                         },
-                        row_selectable='single',
-                        selected_rows=[],
-                    ),
-                ], className="mb-4"),
-                
-                # Add/Edit User Form
-                dbc.Form([
-                    dbc.Row([
-                        dbc.Col([
-                            dbc.Label("Username"),
-                            dbc.Input(id="user-username", type="text", placeholder="e.g., john.doe")
-                        ], width=6),
-                        dbc.Col([
-                            dbc.Label("Display Name"),
-                            dbc.Input(id="user-displayname", type="text", placeholder="e.g., John Doe")
-                        ], width=6)
-                    ], className="mb-3"),
-                    dbc.Row([
-                        dbc.Col([
-                            dbc.Label("Google Sheet URL"),
-                            dbc.Input(id="user-sheet-url", type="text", 
-                                    placeholder="Paste Google Sheet URL"),
-                            dbc.FormText("Paste the full Google Sheet URL or just the ID")
-                        ], width=12)
-                    ], className="mb-3"),
-                    dbc.Row([
-                        dbc.Col([
-                            dbc.ButtonGroup([
-                                dbc.Button("Add New User", id="add-user-btn", 
-                                        color="success", className="me-2"),
-                                dbc.Button("Update Selected", id="update-user-btn", 
-                                        color="primary", className="me-2"),
-                                dbc.Button("Delete Selected", id="delete-user-btn", 
-                                        color="danger")
-                            ])
-                        ])
-                    ])
+                        filter_action='native',
+                        sort_action='native',
+                        page_action='native',
+                        page_size=10
+                    )
                 ])
-            ])
-        ], id="user-management-modal", size="lg"),
-
-            # Add a button to open the modal in the navbar
-            dbc.Button(
-                ["Manage Users ", html.I(className="fas fa-users-cog")],
-                id="open-user-modal",
-                color="light",
-                className="me-2"
-            ),
-            dbc.Container([
-                # Alert area
-                html.Div(id='alerts-area', className="mb-3"),
-
-                # Enhanced Filters Card
-                dbc.Card([
-                    dbc.CardBody([
-                        dbc.Row([
-                            dbc.Col([
-                                html.H5([
-                                    html.I(className="fas fa-filter me-2"),
-                                    "Filters"
-                                ], className="card-title mb-3"),
-                            ], width=12),
-                            dbc.Col([
-                                dcc.Dropdown(
-                                    id='stage-filter',
-                                    placeholder="Filter by Stage",
-                                    multi=True,
-                                    className="mb-2"
-                                )
-                            ], md=3),
-                            dbc.Col([
-                                dcc.Dropdown(
-                                    id='type-filter',
-                                    placeholder="Filter by Type",
-                                    multi=True,
-                                    className="mb-2"
-                                )
-                            ], md=3),
-                            dbc.Col([
-                                dcc.Dropdown(
-                                    id='nationality-filter',
-                                    placeholder="Filter by Nationality",
-                                    multi=True,
-                                    className="mb-2"
-                                )
-                            ], md=3),
-                            dbc.Col([
-                                dcc.Dropdown(
-                                    id='client-note-filter',
-                                    options=[
-                                        {'label': '🔥 Super Angry Clients', 'value': 'SUPER_ANGRY_CLIENT'},
-                                        {'label': '⚡ Priority Visa', 'value': 'PRIORITIZE_VISA'},
-                                        {'label': '📋 Amnesty', 'value': 'AMNESTY'},
-                                        {'label': 'Standard', 'value': 'STANDARD'}
-                                    ],
-                                    placeholder="Filter by Client Priority",
-                                    multi=True,
-                                    className="mb-2"
-                                )
-                            ], md=3)
-                        ]),
-                        dbc.Card([
-                            dbc.CardHeader("Set Thresholds"),
-                            dbc.CardBody([
-                                html.Div([
-                                    html.H5("Thresholds for Current Stages", className="mb-3"),
-                                    dash_table.DataTable(
-                                        id='threshold-table',
-                                        columns=[
-                                            {'name': 'Stage', 'id': 'Stage', 'type': 'text'},
-                                            {'name': 'Threshold (hours)', 'id': 'Threshold', 'type': 'numeric', 'editable': True}
-                                        ],
-                                        data=[],  # To be populated dynamically
-                                        editable=True,
-                                        style_table={'overflowX': 'auto'},
-                                        style_cell={
-                                            'textAlign': 'left',
-                                            'padding': '12px',
-                                        },
-                                        style_header={
-                                            'backgroundColor': '#f8f9fa',
-                                            'fontWeight': 'bold'
-                                        }
-                                    )
-                                ], className="mb-4"),
-                                dbc.Button(
-                                    ["Apply Thresholds ", html.I(className="fas fa-check ms-1")],
-                                    id="apply-thresholds-btn",
-                                    color="primary",
-                                    className="w-100"
-                                )
-                            ])
-                        ], className="mb-4 shadow-sm"),
-
-                        dbc.Row([
-                            dbc.Col([
-                                dbc.ButtonGroup([
-                                    dbc.Button(
-                                        ["Apply Filters ", html.I(className="fas fa-check ms-1")],
-                                        id="apply-filters-btn",
-                                        color="primary",
-                                        className="me-2"
-                                    ),
-                                    dbc.Button(
-                                        ["Reset Filters ", html.I(className="fas fa-undo ms-1")],
-                                        id="reset-filters-btn",
-                                        color="secondary"
-                                    )
-                                ], className="mt-2")
-                            ], className="d-flex justify-content-end")
-                        ])
-                    ])
-                ], className="mb-4 shadow-sm"),
-
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.H5([
-                            html.I(className="fas fa-share me-2"),
-                            "Distribute Tasks"
-                        ])
-                    ]),
-                    dbc.CardBody([
-                        dbc.Row([
-                            dbc.Col([
-                                html.Label("Select Users to Assign Tasks", className="mb-2"),
-                                html.Div([
-                                    dcc.Dropdown(
-                                        id='users-to-distribute',
-                                        options=[
-                                            {'label': user.name, 'value': username}
-                                            for username, user in self.user_manager.users.items()
-                                            if user.active
-                                        ],
-                                        multi=True,
-                                        placeholder="Select users to distribute tasks to...",
-                                        className="mb-3"
-                                    )
-                                ], style={
-                                    'position': 'relative',
-                                    'zIndex': '1000'  # Higher z-index
-                                })
-                            ], width=8),
-                            dbc.Col([
-                                html.Label("\u00A0", className="mb-2"),
-                                dbc.Button(
-                                    ["Distribute Tasks ", html.I(className="fas fa-paper-plane ms-1")],
-                                    id="distribute-btn",
-                                    color="primary",
-                                    className="w-100"
-                                )
-                            ], width=4)
-                        ])
-                    ])
-                ], className="mb-4 shadow-sm"),
-                # Enhanced Severity Legend with Icons
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H6([
-                            html.I(className="fas fa-exclamation-triangle me-2", 
-                                style={'color': '#ff9800'}),
-                            "Understanding Severity Levels"
-                        ], className="text-primary mb-4"),
-                        dbc.Row([
-                            dbc.Col([
-                                html.Div([
-                                    html.Div([
-                                        html.Div(className="severity-dot low"),
-                                        html.Div(className="severity-pulse low")
-                                    ], className="severity-indicator-wrapper"),
-                                    html.Div([
-                                        html.Span("Low Priority", className="severity-title"),
-                                        html.Small("Up to 50% over threshold", 
-                                                className="severity-description")
-                                    ], className="severity-text")
-                                ], className="severity-item"),
-                                html.Div([
-                                    html.Div([
-                                        html.Div(className="severity-dot medium"),
-                                        html.Div(className="severity-pulse medium")
-                                    ], className="severity-indicator-wrapper"),
-                                    html.Div([
-                                        html.Span("Medium Priority", className="severity-title"),
-                                        html.Small("50-100% over threshold", 
-                                                className="severity-description")
-                                    ], className="severity-text")
-                                ], className="severity-item")
-                            ], md=6),
-                            dbc.Col([
-                                html.Div([
-                                    html.Div([
-                                        html.Div(className="severity-dot high"),
-                                        html.Div(className="severity-pulse high")
-                                    ], className="severity-indicator-wrapper"),
-                                    html.Div([
-                                        html.Span("High Priority", className="severity-title"),
-                                        html.Small("100-200% over threshold", 
-                                                className="severity-description")
-                                    ], className="severity-text")
-                                ], className="severity-item"),
-                                html.Div([
-                                    html.Div([
-                                        html.Div(className="severity-dot critical"),
-                                        html.Div(className="severity-pulse critical")
-                                    ], className="severity-indicator-wrapper"),
-                                    html.Div([
-                                        html.Span("Critical Priority", className="severity-title"),
-                                        html.Small("Over 200% threshold", 
-                                                className="severity-description")
-                                    ], className="severity-text")
-                                ], className="severity-item")
-                            ], md=6)
-                        ])
-                    ])
-                ], className="mb-4 severity-card"),
-
-                # KPI Cards Row
-                dbc.Row(id='kpi-cards', className="mb-4"),
-
-                # Enhanced Charts Section
+            ],
+            title="Manage Users ",
+            item_id="manage-users"
+        )
+    ], start_collapsed=True, flush=True, style=custom_styles['filter-card']),
+    
+    # User Management Modal
+    dbc.Modal(
+        [
+            dbc.ModalHeader("User Management"),
+            dbc.ModalBody([
                 dbc.Row([
                     dbc.Col([
-                        dbc.Card([
-                            dbc.CardHeader([
-                                html.H5([
-                                    html.I(className="fas fa-chart-bar me-2"),
-                                    "Client Priority Analysis"
-                                ], className="mb-0")
+                        html.Label("Username", className="font-weight-bold mb-2"),
+                        dbc.Input(id='input-username-modal', placeholder="Enter username", type="text", className="mb-3")
+                    ], md=4),
+                    dbc.Col([
+                        html.Label("Full Name", className="font-weight-bold mb-2"),
+                        dbc.Input(id='input-fullname-modal', placeholder="Enter full name", type="text", className="mb-3")
+                    ], md=4),
+                    dbc.Col([
+                        html.Label("Google Sheet ID", className="font-weight-bold mb-2"),
+                        dbc.Input(id='input-sheet-id-modal', placeholder="Enter Google Sheet ID", type="text", className="mb-3")
+                    ], md=4)
+                ]),
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Button(
+                            html.Span([
+                                html.I(className="fas fa-plus me-2"),
+                                "Add User"
                             ]),
-                            dbc.CardBody([
-                                dcc.Graph(id='client-priority-chart'),
-                                html.Hr(),
-                                dcc.Graph(id='priority-stage-chart')
-                            ])
-                        ], className="shadow-sm")
-                    ], width=12)
-                ], className="mb-4"),
-
-                # Enhanced Detailed Cases Table
-                dbc.Card([
-                    dbc.CardHeader([
-                        dbc.Row([
-                            dbc.Col([
-                                html.H5([
-                                    html.I(className="fas fa-table me-2"),
-                                    "Detailed Cases Overview"
-                                ])
-                            ], md=3),
-                            dbc.Col([
-                                dbc.Input(
-                                    id='table-search',
-                                    type='text',
-                                    placeholder='🔍 Search cases...',
-                                    className="mb-2"
-                                )
-                            ], md=3),
-                            dbc.Col([
-                                dcc.Dropdown(
-                                    id='table-sort-field',
-                                    options=[
-                                        {'label': 'Total Delay', 'value': 'Total Delay (hours)'},
-                                        {'label': 'Current Delay', 'value': 'Delay (hours)'},
-                                        {'label': 'Priority Score', 'value': 'Priority Score'},
-                                        {'label': 'Time in Stage', 'value': 'Time in Stage'}
-                                    ],
-                                    value='Total Delay (hours)',
-                                    placeholder="Sort by...",
-                                    className="mb-2"
-                                )
-                            ], md=3),
-                            dbc.Col([
-                                dbc.Select(
-                                    id='records-per-page',
-                                    options=[
-                                        {'label': '10 records', 'value': 10},
-                                        {'label': '25 records', 'value': 25},
-                                        {'label': '50 records', 'value': 50},
-                                        {'label': '100 records', 'value': 100}
-                                    ],
-                                    value=25,
-                                    className="mb-2"
-                                )
-                            ], md=3)
-                        ])
-                    ]),
-                    dbc.CardBody([
-                        dash_table.DataTable(
-                            id='detailed-table',
-                            filter_action="native",
-                            sort_action="native",
-                            sort_mode="multi",
-                            sort_by=[{'column_id': 'Time in Stage', 'direction': 'desc'}],
-                            page_action="native",
-                            page_current=0,
-                            page_size=25,
-                            style_table={'overflowX': 'auto'},
-                            style_header={
-                                'backgroundColor': '#f8f9fa',
-                                'fontWeight': 'bold',
-                                'textAlign': 'center',
-                                'padding': '12px',
-                                'border': '1px solid #dee2e6'
-                            },
-                            style_cell={
-                                'textAlign': 'left',
-                                'padding': '12px',
-                                'fontSize': '14px',
-                                'fontFamily': '"Segoe UI", system-ui, -apple-system'
-                            },
-                            style_data_conditional=[
-                                {
-                                    'if': {'column_id': 'Client Note', 'filter_query': '{Client Note} = "SUPER_ANGRY_CLIENT"'},
-                                    'backgroundColor': '#ffebee',
-                                    'color': '#c62828',
-                                    'fontWeight': 'bold'
-                                },
-                                {
-                                    'if': {'column_id': 'Client Note', 'filter_query': '{Client Note} = "PRIORITIZE_VISA"'},
-                                    'backgroundColor': '#fff3e0',
-                                    'color': '#ef6c00'
-                                },
-                                {
-                                    'if': {'column_id': 'Client Note', 'filter_query': '{Client Note} = "AMNESTY"'},
-                                    'backgroundColor': '#e8f5e9',
-                                    'color': '#2e7d32'
-                                },
-                                {
-                                    'if': {'column_id': 'Severity', 'filter_query': '{Severity} = "Critical"'},
-                                    'backgroundColor': '#ffebee',
-                                    'color': '#c62828'
-                                },
-                                {
-                                    'if': {'column_id': 'Severity', 'filter_query': '{Severity} = "High"'},
-                                    'backgroundColor': '#fff3e0',
-                                    'color': '#ef6c00'
-                                }
-                            ],
-                            export_format="csv",
-                            export_headers="display",
-                            merge_duplicate_headers=True
+                            id='add-user-modal',
+                            color="success",
+                            className="me-2"
+                        ),
+                        dbc.Button(
+                            html.Span([
+                                html.I(className="fas fa-edit me-2"),
+                                "Update User"
+                            ]),
+                            id='update-user-modal',
+                            color="primary",
+                            className="me-2"
+                        ),
+                        dbc.Button(
+                            html.Span([
+                                html.I(className="fas fa-trash me-2"),
+                                "Delete User"
+                            ]),
+                            id='delete-user-modal',
+                            color="danger"
                         )
-                    ])
-                ], className="shadow-sm"),
-
-                # Enhanced Footer
-                html.Footer([
-                    html.Hr(className="my-4"),
+                    ], className="text-end mt-3")
+                ]),
+                html.Div(id='user-management-results-modal', className="mt-3")
+            ]),
+            dbc.ModalFooter(
+                dbc.Button("Close", id="close-user-modal", className="ms-auto")
+            )
+        ],
+        id="user-management-modal",
+        size="lg",
+        is_open=False
+    ),
+    
+    # User Management & Task Distribution Section
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardHeader([
+                    html.H4("User Management & Task Distribution", className="text-primary mb-0"),
+                    html.Small("Manage users and distribute tasks", className="text-muted")
+                ]),
+                dbc.CardBody([
                     dbc.Row([
                         dbc.Col([
-                            html.P([
-                                "© 2024 Developed by Chekri Khalife @",
-                                html.A("Maids.cc", href="https://maids.cc", className="text-primary"),
-                                ". All rights reserved."
-                            ], className="text-center text-muted mb-0"),
-                            html.P([
-                                html.I(className="fas fa-code me-2"),
-                                
-                            ], className="text-center text-muted small mt-1")
-                        ])
-                    ])
-                ], className="py-3")
-            ])
+                            html.Label("Select Users", className="font-weight-bold mb-2"),
+                            dcc.Dropdown(
+                                id='select-users',
+                                multi=True,
+                                placeholder="Select User(s)",
+                                options=[{'label': user.name, 'value': username} for username, user in user_manager.users.items()],
+                                className="mb-3"
+                            )
+                        ], md=6),
+                        dbc.Col([
+                            html.Label("Distribute Tasks", className="font-weight-bold mb-2"),
+                            dbc.Button(
+                                html.Span([
+                                    html.I(className="fas fa-tasks me-2"),
+                                    "Distribute Tasks"
+                                ]),
+                                id='distribute-tasks',
+                                color="primary",
+                                className="me-2"
+                            )
+                        ], md=6)
+                    ]),
+                    html.Div(id='distribution-results', className="mt-3")
+                ])
+            ], style=custom_styles['filter-card'])
         ])
-
-    def setup_callbacks(self):
-        """Set up enhanced callbacks with new filter functionality."""
-
-        # Callback for opening/closing the modal
-        @self.app.callback(
-            Output("user-management-modal", "is_open"),
-            [Input("open-user-modal", "n_clicks")],
-            [State("user-management-modal", "is_open")],
-            prevent_initial_call=True  # Add this line
-        )
-        def toggle_modal(n1, is_open):
-            if n1:
-                return not is_open
-            return is_open
-        @self.app.callback(
-            Output('threshold-table', 'data'),
-            [Input('upload-data', 'contents')],
-            [State('upload-data', 'filename')]
-        )
-        def populate_threshold_table(contents, filename):
-            if contents is None:
-                return []
-
-            content_type, content_string = contents.split(',')
-            decoded = base64.b64decode(content_string)
-            df = pd.read_excel(io.BytesIO(decoded)) if filename.endswith('.xlsx') else pd.read_csv(io.BytesIO(decoded))
-
-            # Extract unique stages
-            unique_stages = df['Current Stage'].unique()
-            return [{'Stage': stage, 'Threshold': 24} for stage in unique_stages]  # Default threshold: 24
-
-        # Callback to apply thresholds and update dashboard
-        @self.app.callback(
-            [Output('kpi-cards', 'children'),
-            Output('client-priority-chart', 'figure'),
-            Output('priority-stage-chart', 'figure'),
-            Output('detailed-table', 'data'),
-            Output('detailed-table', 'columns')],
-            [Input('apply-thresholds-btn', 'n_clicks')],
-            [State('threshold-table', 'data'),
-            State('upload-data', 'contents'),
-            State('upload-data', 'filename')]
-        )
-        def update_thresholds(n_clicks, threshold_data, contents, filename):
-            if not n_clicks or contents is None:
-                return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
-
-            # Create a threshold dictionary
-            thresholds = {item['Stage']: item['Threshold'] for item in threshold_data}
-
-            # Process the data
-            content_type, content_string = contents.split(',')
-            decoded = base64.b64decode(content_string)
-            df = pd.read_excel(io.BytesIO(decoded)) if filename.endswith('.xlsx') else pd.read_csv(io.BytesIO(decoded))
-
-            df['Threshold (in hours)'] = df['Current Stage'].map(thresholds).fillna(24)# Use thresholds
-            df['Delay (hours)'] = df['Time In Stage'] - df['Threshold (in hours)']
-            df['Is Delayed'] = df['Delay (hours)'] > 0
-
-            # Update KPIs, charts, and table
-            kpi_cards = self.create_kpi_cards(df)
-            client_priority_fig = self.create_client_priority_chart(df)
-            priority_stage_fig = self.create_priority_stage_chart(df)
-            table_data = df.to_dict('records')
-            columns = [{'name': i, 'id': i} for i in df.columns]
-
-            return kpi_cards, client_priority_fig, priority_stage_fig, table_data, columns
-
-        # Callback for user management and table updates
-        @self.app.callback(
-            [Output('user-management-table', 'data'),
-            Output('alerts-area', 'children')],
-            [Input('user-management-modal', 'is_open'),
-            Input('add-user-btn', 'n_clicks'),
-            Input('update-user-btn', 'n_clicks'),
-            Input('delete-user-btn', 'n_clicks')],
-            [State('user-username', 'value'),
-            State('user-displayname', 'value'),
-            State('user-sheet-url', 'value'),
-            State('user-management-table', 'selected_rows'),
-            State('user-management-table', 'data')],
-            prevent_initial_call=True
-        )
-        def manage_users_and_table(is_open, add_clicks, update_clicks, delete_clicks,
-                          username, displayname, sheet_url, selected_rows, table_data):
-            ctx = dash.callback_context
-            if not ctx.triggered:
-                user_data = [
-                    {
-                        'username': username,
-                        'name': user.name,
-                        'sheet_id': user.google_sheet_id,
-                        'status': 'Active' if user.active else 'Inactive',
-                        'workload': user.workload
-                    }
-                    for username, user in self.user_manager.users.items()
-                ]
-                return user_data, dash.no_update
-
-            trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-            
-            if trigger_id == 'user-management-modal':
-                user_data = [
-                    {
-                        'username': username,
-                        'name': user.name,
-                        'sheet_id': user.google_sheet_id,
-                        'status': 'Active' if user.active else 'Inactive',
-                        'workload': user.workload
-                    }
-                    for username, user in self.user_manager.users.items()
-                ]
-                return user_data, dash.no_update
-
-            try:
-                if trigger_id == 'add-user-btn':
-                    if not all([username, displayname, sheet_url]):
-                        return dash.no_update, dbc.Alert(
-                            "All fields are required",
-                            color="warning",
-                            dismissable=True
-                        )
-                    
-                    try:
-                        sheet_id = self.user_manager.extract_sheet_id(sheet_url)
-                        if self.user_manager.add_user(username, displayname, sheet_id):
-                            alert = dbc.Alert(
-                                f"User {displayname} added successfully",
-                                color="success",
-                                dismissable=True
+    ]),
+    
+    # Filters Section
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardHeader(html.H4("Filters", className="text-primary mb-0")),
+                dbc.CardBody([
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Stage", className="font-weight-bold mb-2"),
+                            dcc.Dropdown(
+                                id='filter-stage',
+                                multi=True,
+                                placeholder="Select Stage(s)",
+                                className="mb-3"
                             )
-                        else:
-                            raise Exception("Failed to add user")
-                    except Exception as e:
-                        return dash.no_update, dbc.Alert(
-                            f"Error adding user: {str(e)}",
-                            color="danger",
-                            dismissable=True
-                        )
-
-                elif trigger_id == 'update-user-btn':
-                    if not selected_rows:
-                        return dash.no_update, dbc.Alert(
-                            "Please select a user to update",
-                            color="warning",
-                            dismissable=True
-                        )
-                    
-                    try:
-                        sheet_id = self.user_manager.extract_sheet_id(sheet_url) if sheet_url else None
-                        selected_username = table_data[selected_rows[0]]['username']
-                        if self.user_manager.update_user(selected_username, displayname, sheet_id):
-                            alert = dbc.Alert(
-                                f"User updated successfully",
-                                color="success",
-                                dismissable=True
+                        ], md=3),
+                        dbc.Col([
+                            html.Label("Type", className="font-weight-bold mb-2"),
+                            dcc.Dropdown(
+                                id='filter-type',
+                                multi=True,
+                                placeholder="Select Type(s)",
+                                className="mb-3"
                             )
-                        else:
-                            raise Exception("Failed to update user")
-                    except Exception as e:
-                        return dash.no_update, dbc.Alert(
-                            f"Error updating user: {str(e)}",
-                            color="danger",
-                            dismissable=True
-                        )
-
-                elif trigger_id == 'delete-user-btn':
-                    if not selected_rows:
-                        return dash.no_update, dbc.Alert(
-                            "Please select a user to delete",
-                            color="warning",
-                            dismissable=True
-                        )
-                    
-                    try:
-                        selected_user = table_data[selected_rows[0]]['username']
-                        if self.user_manager.delete_user(selected_user):
-                            # Get updated user data after deletion
-                            user_data = [
-                                {
-                                    'username': username,
-                                    'name': user.name,
-                                    'sheet_id': user.google_sheet_id,
-                                    'status': 'Active' if user.active else 'Inactive',
-                                    'workload': user.workload
-                                }
-                                for username, user in self.user_manager.users.items()
-                            ]
-                            alert = dbc.Alert(
-                                f"User {selected_user} deleted successfully",
-                                color="success",
-                                dismissable=True
+                        ], md=3),
+                        dbc.Col([
+                            html.Label("Nationality", className="font-weight-bold mb-2"),
+                            dcc.Dropdown(
+                                id='filter-nationality',
+                                multi=True,
+                                placeholder="Select Nationality(s)",
+                                className="mb-3"
                             )
-                            return user_data, alert
-                        else:
-                            raise Exception("Failed to delete user")
-                    except Exception as e:
-                        return dash.no_update, dbc.Alert(
-                            f"Error deleting user: {str(e)}",
-                            color="danger",
-                            dismissable=True
-                        )
+                        ], md=3),
+                        dbc.Col([
+                            html.Label("Client Priority", className="font-weight-bold mb-2"),
+                            dcc.Dropdown(
+                                id='filter-client-note',
+                                multi=True,
+                                placeholder="Select Priority",
+                                className="mb-3"
+                            )
+                        ], md=3)
+                    ])
+                ])
+            ], style=custom_styles['filter-card'])
+        ])
+    ]),
+    
+    # Stage Thresholds Section
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardHeader([
+                    html.H4("Stage Thresholds (Hours)", className="text-primary mb-0"),
+                    html.Small("Set maximum allowed hours for each stage", 
+                             className="text-muted")
+                ]),
+                dbc.CardBody([
+                    html.Div(id='threshold-inputs', style={
+                        'max-height': '300px',
+                        'overflow-y': 'auto',
+                        'padding': '10px'
+                    }),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Button(
+                                html.Span([
+                                    html.I(className="fas fa-filter me-2"),
+                                    "Apply Filters & Thresholds"
+                                ]),
+                                id='apply-filters',
+                                color="primary",
+                                className="me-2"
+                            ),
+                            dbc.Button(
+                                html.Span([
+                                    html.I(className="fas fa-undo me-2"),
+                                    "Reset"
+                                ]),
+                                id='reset-filters',
+                                color="secondary"
+                            )
+                        ], className="text-end mt-3")
+                    ])
+                ])
+            ], style=custom_styles['filter-card'])
+        ])
+    ]),
+    
+    # Metrics Row
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    html.Div([
+                        html.I(className="fas fa-exclamation-triangle fa-2x mb-2 text-danger"),
+                        html.H3(id='metric-super-angry', className="text-danger mb-1"),
+                        html.P("Super Angry Clients", className="text-muted mb-0")
+                    ], className="text-center")
+                ])
+            ], style=custom_styles['metric-card'])
+        ], md=4),
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    html.Div([
+                        html.I(className="fas fa-passport fa-2x mb-2 text-warning"),
+                        html.H3(id='metric-prioritize-visa', className="text-warning mb-1"),
+                        html.P("Priority Visa Cases", className="text-muted mb-0")
+                    ], className="text-center")
+                ])
+            ], style=custom_styles['metric-card'])
+        ], md=4),
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    html.Div([
+                        html.I(className="fas fa-clock fa-2x mb-2 text-info"),
+                        html.H3(id='metric-total-late', className="text-info mb-1"),
+                        html.P("Total Late Cases", className="text-muted mb-0")
+                    ], className="text-center")
+                ])
+            ], style=custom_styles['metric-card'])
+        ], md=4)
+    ], className="mb-4"),
+    
+    # Charts Section
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardHeader([
+                    html.H4("Late Cases by Stage (Top 10)", className="text-primary mb-0"),
+                    html.Small("Number of cases exceeding threshold per stage", 
+                             className="text-muted")
+                ]),
+                dbc.CardBody([
+                    dcc.Graph(id='bar-chart')
+                ])
+            ], style=custom_styles['chart-card'])
+        ], md=12)
+    ]),
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardHeader([
+                    html.H4("Stage Distribution (Top 10)", className="text-primary mb-0"),
+                    html.Small("Current distribution of all cases", 
+                             className="text-muted")
+                ]),
+                dbc.CardBody([
+                    dcc.Graph(id='pie-chart')
+                ])
+            ], style=custom_styles['chart-card'])
+        ], md=12)
+    ]),
+    
+    # Data Table Section
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardHeader([
+                    dbc.Row([
+                        dbc.Col([
+                            html.H4("Detailed Data", className="text-primary mb-0"),
+                            html.Small("Full dataset with filtering and sorting", 
+                                     className="text-muted")
+                        ]),
+                        dbc.Col([
+                            dbc.Button(
+                                html.Span([
+                                    html.I(className="fas fa-file-csv me-2"),
+                                    "Export CSV"
+                                ]),
+                                id="export-csv",
+                                color="success",
+                                size="sm",
+                                className="me-2"
+                            ),
+                            dbc.Button(
+                                html.Span([
+                                    html.I(className="fas fa-file-excel me-2"),
+                                    "Export Excel"
+                                ]),
+                                id="export-excel",
+                                color="success",
+                                size="sm"
+                            )
+                        ], className="text-end d-flex align-items-center")
+                    ])
+                ]),
+                dbc.CardBody([
+                    html.Div(id='data-table')
+                ])
+            ], style=custom_styles['chart-card'])
+        ])
+    ]),
+    
+    # Hidden download components
+    html.Div([
+        html.A(id='download-csv', download="filtered_data.csv", href="", target="_blank", style={'display': 'none'}),
+        html.A(id='download-excel', download="filtered_data.xlsx", href="", target="_blank", style={'display': 'none'})
+    ])
+], fluid=True)
+# Helper functions
+def get_sorted_unique(series: pd.Series) -> List[str]:
+    """Get sorted unique values from a series, handling mixed types and NaN values."""
+    unique_values = [str(x) for x in series.unique() if pd.notna(x)]
+    return sorted(unique_values)
 
-                # Get updated user data
-                user_data = [
-                    {
-                        'username': username,
-                        'name': user.name,
-                        'sheet_id': user.google_sheet_id,
-                        'status': 'Active' if user.active else 'Inactive',
-                        'workload': user.workload
-                    }
-                    for username, user in self.user_manager.users.items()
-                ]
-                
-                return user_data, alert
-
-            except Exception as e:
-                return dash.no_update, dbc.Alert(
-                    f"Error: {str(e)}",
-                    color="danger",
-                    dismissable=True
-                )
-
-        # Callback to populate form when selecting a user
-        @self.app.callback(
-            [Output('user-username', 'value'),
-            Output('user-displayname', 'value'),
-            Output('user-sheet-url', 'value')],
-            [Input('user-management-table', 'selected_rows')],
-            [State('user-management-table', 'data')],
-            prevent_initial_call=True
-        )
-        def populate_form(selected_rows, table_data):
-            """Populate form when user is selected"""
-            if not selected_rows:
-                return "", "", ""
-            
-            selected_user = table_data[selected_rows[0]]
-            return (
-                selected_user['username'],
-                selected_user['name'],
-                selected_user['sheet_id']
-            )
-
-        # Callback for reset filters
-        @self.app.callback(
-            [Output('stage-filter', 'value'),
-            Output('type-filter', 'value'),
-            Output('nationality-filter', 'value'),
-            Output('client-note-filter', 'value')],
-            [Input('reset-filters-btn', 'n_clicks')],
-            prevent_initial_call=True
-        )
-        def reset_filters(n_clicks):
-            """Reset all filters to their default state."""
-            return None, None, None, None
-
-        # Your existing update_dashboard callback
-        @self.app.callback(
-            [Output('kpi-cards', 'children'),
-            Output('client-priority-chart', 'figure'),
-            Output('priority-stage-chart', 'figure'),
-            Output('detailed-table', 'data'),
-            Output('detailed-table', 'columns'),
-            Output('stage-filter', 'options'),
-            Output('type-filter', 'options'),
-            Output('nationality-filter', 'options'),
-            Output('last-update', 'children'),
-            Output('alerts-area', 'children', allow_duplicate=True)],
-            [Input('upload-data', 'contents'),
-            Input('apply-filters-btn', 'n_clicks'),
-            Input('distribute-btn', 'n_clicks')],
-            [State('upload-data', 'filename'),
-            State('stage-filter', 'value'),
-            State('type-filter', 'value'),
-            State('nationality-filter', 'value'),
-            State('client-note-filter', 'value'),
-            State('table-search', 'value'),
-            State('table-sort-field', 'value'),
-            State('records-per-page', 'value'),
-            State('users-to-distribute', 'value'),
-            State('detailed-table', 'data')],
-            prevent_initial_call=True  # Add this line
-        )
-        def update_dashboard(contents, filter_clicks, distribute_clicks,
-                      filename, stage_filter, type_filter,
-                      nationality_filter, client_note_filter,
-                      search_value, sort_field, records_per_page,
-                      selected_users, table_data):
-            """Update dashboard with enhanced filtering and sorting."""
-            ctx = dash.callback_context
-            if not ctx.triggered:
-                return [[], {}, {}, [], [], [], [], [], "", None]
-            
-            trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-            
-            # Handle distribution button click
-            if trigger_id == 'distribute-btn':
-                if not selected_users or not table_data:
-                    return dash.no_update * 9 + (
-                        dbc.Alert("Please select users and ensure there is data to distribute",
-                                color="warning", dismissable=True),
-                    )
-                
-                try:
-                    df = pd.DataFrame(table_data)
-                    results = self.user_manager.distribute_data(selected_users, df)
-                    
-                    # Process detailed results
-                    success_count = sum(1 for r in results.values() 
-                                      if isinstance(r, dict) and r.get("status") == "success")
-                    error_count = sum(1 for r in results.values() 
-                                     if isinstance(r, dict) and r.get("status") == "error")
-                    warning_count = sum(1 for r in results.values() 
-                                      if isinstance(r, dict) and r.get("status") == "warning")
-                    
-                    alert_content = []
-                    
-                    # Summary section
-                    summary = [
-                        html.H5("Distribution Results", className="mb-3"),
-                        html.P([
-                            f"Successfully distributed to {success_count} users",
-                            html.Br(),
-                            f"Errors: {error_count}",
-                            html.Br(),
-                            f"Warnings: {warning_count}"
-                        ], className="mb-3")
-                    ]
-                    alert_content.extend(summary)
-                    
-                    # Detailed results section
-                    if error_count > 0 or warning_count > 0:
-                        alert_content.append(html.H6("Detailed Results:", className="mb-2"))
-                        for username, result in results.items():
-                            if isinstance(result, dict):
-                                if result["status"] in ["error", "warning"]:
-                                    alert_content.extend([
-                                        html.Div([
-                                            html.Strong(f"{username}: "),
-                                            result["message"],
-                                            # Add debugging info if available
-                                            html.Details([
-                                                html.Summary("Debug Info"),
-                                                html.Pre(json.dumps(result["debug"], indent=2))
-                                            ]) if "debug" in result else None
-                                        ], className="mb-2")
-                                    ])
-                    
-                    # Determine alert color based on results
-                    if error_count > 0:
-                        alert_color = "danger"
-                    elif warning_count > 0:
-                        alert_color = "warning"
-                    else:
-                        alert_color = "success"
-                    
-                    alert = dbc.Alert(
-                        alert_content,
-                        color=alert_color,
-                        dismissable=True
-                    )
-                    
-                    return dash.no_update * 9 + (alert,)
-                                
-                except Exception as e:
-                    error_alert = dbc.Alert(
-                        [
-                            html.H5("Distribution Error", className="mb-3"),
-                            html.P(str(e)),
-                            html.Details([
-                                html.Summary("Debug Info"),
-                                html.Pre(traceback.format_exc())
-                            ])
-                        ],
-                        color="danger",
-                        dismissable=True
-                    )
-                    return dash.no_update * 9 + (error_alert,)
-            # Handle data upload and filtering (existing functionality)
-            empty_returns = [[], {}, {}, [], [], [], [], [], "", None]
-            
-            if contents is None:
-                return empty_returns
-
-            try:
-                # Process uploaded file
-                content_type, content_string = contents.split(',')
-                decoded = base64.b64decode(content_string)
-                
-                if filename.endswith('.xlsx'):
-                    self.df = pd.read_excel(io.BytesIO(decoded))
-                elif filename.endswith('.csv'):
-                    self.df = pd.read_csv(io.BytesIO(decoded))
-                else:
-                    raise ValueError("Unsupported file format. Please upload an Excel (.xlsx) or CSV file.")
-                
-                self.df = self.process_data(self.df)
-            except Exception as e:
-                return empty_returns[:-1] + [
-                    dbc.Alert(
-                        f"Error processing data: {str(e)}", 
-                        color="danger", 
-                        dismissable=True
-                    )
-                ]
-
-            # Apply filters
-            filtered_df = self.df.copy()
-            
-            if stage_filter:
-                filtered_df = filtered_df[filtered_df['Current Stage'].isin(stage_filter)]
-            if type_filter:
-                filtered_df = filtered_df[filtered_df['Type'].isin(type_filter)]
-            if nationality_filter:
-                filtered_df = filtered_df[filtered_df['Nationality'].isin(nationality_filter)]
-            if client_note_filter:
-                filtered_df = filtered_df[filtered_df['Client Note'].isin(client_note_filter)]
-                
-            # Enhanced search functionality
-            if search_value:
-                search = search_value.lower()
-                filtered_df = filtered_df[
-                    filtered_df.astype(str).apply(lambda x: x.str.lower()).apply(
-                        lambda x: x.str.contains(search, na=False)
-                    ).any(axis=1)
-                ]
-
-            # Create visualizations
-            kpi_cards = self.create_kpi_cards(filtered_df)
-            client_priority_fig = self.create_client_priority_chart(filtered_df)
-            priority_stage_fig = self.create_priority_stage_chart(filtered_df)
-
-            # Enhanced sorting
-            if sort_field:
-                filtered_df = filtered_df.sort_values(sort_field, ascending=False)
-            
-            # Prepare table data with formatted values
-            table_data = filtered_df.to_dict('records')
-            columns = [{'name': i, 'id': i} for i in filtered_df.columns]
-
-            # Create filter options with counts
-            def create_options_with_counts(column):
-                value_counts = self.df[column].value_counts()
-                return [{'label': f"{x} ({value_counts[x]})", 'value': x} 
-                    for x in sorted(self.df[column].unique())]
-
-            stage_options = create_options_with_counts('Current Stage')
-            type_options = create_options_with_counts('Type')
-            nationality_options = create_options_with_counts('Nationality')
-
-            # Update time with enhanced formatting
-            update_time = html.Span([
-                html.I(className="fas fa-clock me-1"),
-                f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-            ])
-
-            return (
-                kpi_cards, client_priority_fig, priority_stage_fig,
-                table_data, columns, stage_options, type_options, nationality_options,
-                update_time, None
-            )
+def parse_contents(contents: str, filename: str) -> pd.DataFrame:
+    """Parse uploaded file contents into a pandas DataFrame."""
+    if contents is None:
+        return pd.DataFrame()
+    
+    try:
+        # Split the content
+        content_type, content_string = contents.split(',')
+        decoded = base64.b64decode(content_string)
         
-
-    def add_custom_css(self):
-        """Add comprehensive custom CSS styles."""
-        custom_css = """
-            /* Core Variables */
-            :root {
-                --primary: #1976d2;
-                --primary-light: #2196f3;
-                --primary-dark: #1565c0;
-                --success: #2e7d32;
-                --warning: #ed6c02;
-                --danger: #d32f2f;
-                --neutral-dark: #2c3e50;
-                --neutral-light: #f8f9fa;
-                --shadow-sm: 0 2px 4px rgba(0,0,0,0.05);
-                --shadow-md: 0 4px 8px rgba(0,0,0,0.1); 
-                --shadow-lg: 0 8px 16px rgba(0,0,0,0.15);
-                --border-radius: 12px;
-                --transition: all 0.3s ease;
-            }
-
-            /* Global Styles */
-            body {
-                background-color: var(--neutral-light);
-                color: var(--neutral-dark);
-                font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-            }
-
-            /* Card Styles */
-            .card {
-                background: white;
-                border: none;
-                border-radius: var(--border-radius);
-                box-shadow: var(--shadow-md);
-                transition: var(--transition);
-                overflow: visible;
-            }
-
-            .card:hover {
-                transform: translateY(-4px);
-                box-shadow: var(--shadow-lg);
-            }
-
-            .card-header {
-                background: linear-gradient(145deg, white 0%, var(--neutral-light) 100%);
-                border-bottom: 1px solid rgba(0,0,0,0.1);
-                padding: 1.25rem;
-            }
-
-            /* Navbar Styles */
-            .navbar {
-                background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
-                border-radius: 0 0 var(--border-radius) var(--border-radius);
-                box-shadow: var(--shadow-md);
-            }
-
-            /* Button Styles */
-            .btn {
-                border-radius: 8px;
-                padding: 0.75rem 1.5rem;
-                font-weight: 500;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-                transition: var(--transition);
-            }
-
-            .btn-primary {
-                background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
-                border: none;
-                box-shadow: 0 4px 6px rgba(33, 150, 243, 0.2);
-            }
-
-            .btn-primary:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 6px 12px rgba(33, 150, 243, 0.3);
-            }
-
-            /* Dropdown Styles */
-            .dropdown-wrapper {
-                position: relative !important;
-                z-index: 1500 !important;
-            }
-
-            .Select-control {
-                border: 2px solid #e0e0e0 !important;
-                border-radius: 8px !important;
-                transition: var(--transition) !important;
-            }
-
-            .Select-control:hover {
-                border-color: var(--primary-light) !important;
-            }
-
-            .Select-menu-outer {
-                border: none !important;
-                border-radius: 8px !important;
-                box-shadow: var(--shadow-lg) !important;
-                z-index: 1600 !important;
-                margin-top: 4px !important;
-            }
-
-            /* Severity Card Styles */
-            .severity-card {
-                background: linear-gradient(145deg, white 0%, var(--neutral-light) 100%);
-            }
-
-            .severity-item {
-                display: flex;
-                align-items: center;
-                padding: 1rem;
-                margin-bottom: 1rem;
-                background: white;
-                border-radius: 8px;
-                transition: var(--transition);
-                box-shadow: var(--shadow-sm);
-            }
-
-            .severity-item:hover {
-                transform: translateX(8px);
-                box-shadow: var(--shadow-md);
-            }
-
-            .severity-indicator-wrapper {
-                position: relative;
-                width: 40px;
-                height: 40px;
-                margin-right: 1rem;
-            }
-
-            .severity-dot {
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                width: 12px;
-                height: 12px;
-                border-radius: 50%;
-            }
-
-            .severity-pulse {
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                width: 24px;
-                height: 24px;
-                border-radius: 50%;
-                animation: pulse 2s infinite;
-            }
-
-            @keyframes pulse {
-                0% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
-                50% { transform: translate(-50%, -50%) scale(1.5); opacity: 0.2; }
-                100% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
-            }
-
-            .severity-dot.low, .severity-pulse.low {
-                background-color: #4caf50;
-            }
-
-            .severity-dot.medium, .severity-pulse.medium {
-                background-color: #ffc107;
-            }
-
-            .severity-dot.high, .severity-pulse.high {
-                background-color: #ff9800;
-            }
-
-            .severity-dot.critical, .severity-pulse.critical {
-                background-color: #f44336;
-            }
-
-            /* Table Styles */
-            .dash-table-container {
-                border-radius: var(--border-radius);
-                overflow: hidden;
-                box-shadow: var(--shadow-md);
-            }
-
-            .dash-spreadsheet-container .dash-spreadsheet-inner td,
-            .dash-spreadsheet-container .dash-spreadsheet-inner th {
-                padding: 1rem;
-                border: 1px solid #e0e0e0;
-                font-size: 0.9rem;
-            }
-
-            .dash-spreadsheet-container .dash-spreadsheet-inner th {
-                background: linear-gradient(145deg, var(--neutral-light) 0%, #e9ecef 100%);
-                font-weight: 600;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-            }
-
-            /* Alert Styles */
-            .alert {
-                border-radius: var(--border-radius);
-                border: none;
-                padding: 1rem 1.5rem;
-                box-shadow: var(--shadow-sm);
-            }
-
-            .alert-success {
-                background: linear-gradient(145deg, #e8f5e9 0%, #c8e6c9 100%);
-                color: var(--success);
-            }
-
-            .alert-warning {
-                background: linear-gradient(145deg, #fff3e0 0%, #ffe0b2 100%);
-                color: var(--warning);
-            }
-
-            .alert-danger {
-                background: linear-gradient(145deg, #ffebee 0%, #ffcdd2 100%);
-                color: var(--danger);
-            }
-
-            /* Form Styles */
-            .form-control {
-                border-radius: 8px;
-                padding: 0.75rem 1rem;
-                border: 2px solid #e0e0e0;
-                transition: var(--transition);
-            }
-
-            .form-control:focus {
-                border-color: var(--primary);
-                box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
-            }
-
-            /* Modal Styles */
-            .modal-content {
-                border-radius: var(--border-radius);
-                border: none;
-                box-shadow: var(--shadow-lg);
-            }
-
-            .modal-header {
-                background: linear-gradient(145deg, var(--neutral-light) 0%, #e9ecef 100%);
-                border-radius: calc(var(--border-radius) - 1px) calc(var(--border-radius) - 1px) 0 0;
-                border-bottom: 2px solid #e9ecef;
-            }
-
-            /* KPI Card Styles */
-            .kpi-card {
-                background: linear-gradient(145deg, white 0%, var(--neutral-light) 100%);
-                border-radius: var(--border-radius);
-                padding: 1.5rem;
-                transition: var(--transition);
-            }
-
-            .kpi-card:hover {
-                transform: translateY(-4px);
-            }
-
-            /* Chart Styles */
-            .chart-container {
-                background: white;
-                border-radius: var(--border-radius);
-                padding: 1.5rem;
-                box-shadow: var(--shadow-md);
-                margin-bottom: 1.5rem;
-            }
-
-            /* Status Indicators */
-            .status-indicator {
-                width: 10px;
-                height: 10px;
-                border-radius: 50%;
-                display: inline-block;
-                margin-right: 8px;
-            }
-
-            .status-active {
-                background-color: var(--success);
-                box-shadow: 0 0 0 4px rgba(46, 125, 50, 0.2);
-            }
-
-            .status-inactive {
-                background-color: var(--danger);
-                box-shadow: 0 0 0 4px rgba(211, 47, 47, 0.2);
-            }
-        """
-        self.app.index_string = self.app.index_string.replace(
-            '</head>',
-            f'<style>{custom_css}</style></head>'
+        # Read the file based on its type
+        if 'csv' in filename.lower():
+            df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+        elif 'xls' in filename.lower():
+            df = pd.read_excel(io.BytesIO(decoded))
+        else:
+            raise ValueError("Unsupported file type")
+        
+        # Clean up the DataFrame
+        df = df.replace({pd.NA: None, pd.NaT: None})
+        
+        # Sort the DataFrame by 'Note time' and 'RPA try count' to ensure proper filling
+        df = df.sort_values(by=['Note time', 'RPA try count'])
+        
+        # List of columns to forward-fill
+        columns_to_fill = [
+            'Housemaid Name', 'Housemaid ID', 'HM Status', 
+            'Request ID MB', 'Nationality', 'Type'
+        ]
+        
+        # Forward-fill the specified columns
+        for column in columns_to_fill:
+            if column in df.columns:
+                df[column] = df[column].ffill()
+        
+        # Add Late column if not exists
+        if 'Late' not in df.columns:
+            df['Late'] = False
+            
+        return df
+    except Exception as e:
+        print(f"Error parsing file: {str(e)}")
+        return pd.DataFrame()
+# Callback to update filters and thresholds
+@app.callback(
+    [Output('filter-stage', 'options'),
+     Output('filter-type', 'options'),
+     Output('filter-nationality', 'options'),
+     Output('filter-client-note', 'options'),
+     Output('threshold-inputs', 'children')],
+    Input('upload-data', 'contents'),
+    State('upload-data', 'filename')
+)
+def update_filters_and_thresholds(contents: str, filename: str):
+    """Update filter options and threshold inputs based on uploaded data."""
+    if contents is None:
+        return [], [], [], [], []
+    
+    # Parse the uploaded file
+    df = parse_contents(contents, filename)
+    if df.empty:
+        return [], [], [], [], []
+    
+    # Get unique values for filters
+    stages = [{'label': stage, 'value': stage} for stage in get_sorted_unique(df['Current Stage'])]
+    types = [{'label': type_, 'value': type_} for type_ in get_sorted_unique(df['Type'])]
+    nationalities = [{'label': nat, 'value': nat} for nat in get_sorted_unique(df['Nationality'])]
+    client_notes = [{'label': note, 'value': note} for note in get_sorted_unique(df['Client Note'])]
+    
+    # Create threshold inputs for each stage
+    threshold_inputs = []
+    for stage in get_sorted_unique(df['Current Stage']):
+        threshold_inputs.append(
+            dbc.Card([
+                dbc.Row([
+                    dbc.Col(html.Label(stage, className="font-weight-bold"), width=8),
+                    dbc.Col(
+                        dbc.Input(
+                            id={'type': 'threshold-input', 'stage': stage},
+                            type='number',
+                            value=24,
+                            min=0,
+                            className="form-control-sm"
+                        ),
+                        width=4
+                    )
+                ], className="align-items-center")
+            ], className="mb-2", style=custom_styles['threshold-card'])
         )
+    
+    return stages, types, nationalities, client_notes, threshold_inputs
+# Callback to populate the user table
+@app.callback(
+    Output('user-table', 'data'),
+    Input('user-management-modal', 'is_open')  # Trigger when the modal is opened
+)
+def populate_user_table(is_open):
+    """Populate the user table with data from the UserManager."""
+    if not is_open:
+        return dash.no_update
+    
+    # Get user data from the UserManager
+    user_data = [
+        {
+            'username': username,
+            'name': user.name,
+            'google_sheet_id': user.google_sheet_id,
+            'status': 'Active' if user.active else 'Inactive',
+            'workload': user.workload
+        }
+        for username, user in user_manager.users.items()
+    ]
+    
+    return user_data
 
-    def run_server(self, debug=True, port=8050, host='0.0.0.0'):
-        """Run the Dash server with startup message."""
-        self.create_layout()
-        self.setup_callbacks()
-        self.add_custom_css()
-        print("""
-        ╔════════════════════════════════════════════╗
-        ║     Delayed Cases Analytics Dashboard      ║
-        ╠════════════════════════════════════════════╣
-        ║ Starting server at http://localhost:8050   ║
-        ║ Press Ctrl+C to quit                       ║
-        ╚════════════════════════════════════════════╝
-        """)
-        self.app.run_server(debug=debug, port=port, host=host)
+# Callback to handle user selection
+@app.callback(
+    [Output('input-username', 'value'),
+     Output('input-fullname', 'value'),
+     Output('input-sheet-id', 'value')],
+    Input('user-table', 'selected_rows'),
+    State('user-table', 'data')
+)
+def populate_form_with_selected_user(selected_rows, user_data):
+    """Populate the form with data from the selected user."""
+    if not selected_rows:
+        return "", "", ""
+    
+    # Get the selected user's data
+    selected_user = user_data[selected_rows[0]]
+    return (
+        selected_user['username'],
+        selected_user['name'],
+        selected_user['google_sheet_id']
+    )
+# Callback to add a new user
+@app.callback(
+    [Output('user-management-results', 'children', allow_duplicate=True),
+     Output('user-table', 'data', allow_duplicate=True)],
+    Input('add-user', 'n_clicks'),
+    [State('input-username', 'value'),
+     State('input-fullname', 'value'),
+     State('input-sheet-id', 'value')],
+    prevent_initial_call=True
+)
+def add_user(n_clicks, username, fullname, sheet_id):
+    """Add a new user to the UserManager and refresh the table."""
+    if not username or not fullname or not sheet_id:
+        return dbc.Alert("Please fill in all fields.", color="warning"), dash.no_update
+    
+    if username in user_manager.users:
+        return dbc.Alert(f"User '{username}' already exists.", color="danger"), dash.no_update
+    
+    try:
+        user_manager.users[username] = User(name=fullname, google_sheet_id=sheet_id)
+        # Refresh the table
+        user_data = [
+            {
+                'username': username,
+                'name': user.name,
+                'google_sheet_id': user.google_sheet_id,
+                'status': 'Active' if user.active else 'Inactive',
+                'workload': user.workload
+            }
+            for username, user in user_manager.users.items()
+        ]
+        return dbc.Alert(f"User '{username}' added successfully.", color="success"), user_data
+    except Exception as e:
+        return dbc.Alert(f"Error adding user: {str(e)}", color="danger"), dash.no_update
 
-if __name__ == "__main__":
-    analytics_app = DelayedMaidsAnalytics()
-    analytics_app.create_layout()  # Explicitly create layout here
-    analytics_app.setup_callbacks()  # Setup callbacks before starting
-    server = analytics_app.app.server  # Expose Flask server for Gunicorn
-    analytics_app.run_server(debug=True, port=8050, host="0.0.0.0")
+# Callback to update an existing user
+@app.callback(
+    [Output('user-management-results', 'children', allow_duplicate=True),
+     Output('user-table', 'data', allow_duplicate=True)],
+    Input('update-user', 'n_clicks'),
+    [State('input-username', 'value'),
+     State('input-fullname', 'value'),
+     State('input-sheet-id', 'value')],
+    prevent_initial_call=True
+)
+def update_user(n_clicks, username, fullname, sheet_id):
+    """Update an existing user in the UserManager and refresh the table."""
+    if not username:
+        return dbc.Alert("Please enter a username.", color="warning"), dash.no_update
+    
+    if username not in user_manager.users:
+        return dbc.Alert(f"User '{username}' does not exist.", color="danger"), dash.no_update
+    
+    try:
+        user = user_manager.users[username]
+        if fullname:
+            user.name = fullname
+        if sheet_id:
+            user.google_sheet_id = sheet_id
+        # Refresh the table
+        user_data = [
+            {
+                'username': username,
+                'name': user.name,
+                'google_sheet_id': user.google_sheet_id,
+                'status': 'Active' if user.active else 'Inactive',
+                'workload': user.workload
+            }
+            for username, user in user_manager.users.items()
+        ]
+        return dbc.Alert(f"User '{username}' updated successfully.", color="success"), user_data
+    except Exception as e:
+        return dbc.Alert(f"Error updating user: {str(e)}", color="danger"), dash.no_update
+
+# Callback to delete a user
+@app.callback(
+    [Output('user-management-results', 'children', allow_duplicate=True),
+     Output('user-table', 'data', allow_duplicate=True)],
+    Input('delete-user', 'n_clicks'),
+    State('input-username', 'value'),
+    prevent_initial_call=True
+)
+def delete_user(n_clicks, username):
+    """Delete a user from the UserManager and refresh the table."""
+    if not username:
+        return dbc.Alert("Please enter a username.", color="warning"), dash.no_update
+    
+    if username not in user_manager.users:
+        return dbc.Alert(f"User '{username}' does not exist.", color="danger"), dash.no_update
+    
+    try:
+        del user_manager.users[username]
+        # Refresh the table
+        user_data = [
+            {
+                'username': username,
+                'name': user.name,
+                'google_sheet_id': user.google_sheet_id,
+                'status': 'Active' if user.active else 'Inactive',
+                'workload': user.workload
+            }
+            for username, user in user_manager.users.items()
+        ]
+        return dbc.Alert(f"User '{username}' deleted successfully.", color="success"), user_data
+    except Exception as e:
+        return dbc.Alert(f"Error deleting user: {str(e)}", color="danger"), dash.no_update
+# Callback for task distribution
+@app.callback(
+    Output('distribution-results', 'children'),
+    Input('distribute-tasks', 'n_clicks'),
+    State('select-users', 'value'),
+    State('upload-data', 'contents'),
+    State('upload-data', 'filename'),
+    State('filter-stage', 'value'),
+    State('filter-type', 'value'),
+    State('filter-nationality', 'value'),
+    State('filter-client-note', 'value'),
+    State({'type': 'threshold-input', 'stage': dash.ALL}, 'value'),
+    State({'type': 'threshold-input', 'stage': dash.ALL}, 'id'),
+    prevent_initial_call=True
+)
+def distribute_tasks(n_clicks, selected_users, contents, filename, stages, types, 
+                     nationalities, client_notes, thresholds, threshold_ids):
+    """Distribute filtered tasks to selected users' Google Sheets."""
+    if not selected_users or not contents:
+        return dbc.Alert("No users selected or no data uploaded.", color="warning")
+    
+    # Parse the uploaded file
+    df = parse_contents(contents, filename)
+    if df.empty:
+        return dbc.Alert("Uploaded file is empty or invalid.", color="danger")
+    
+    # Apply filters to create the filtered DataFrame
+    filtered_df = df.copy()
+    
+    if stages:
+        filtered_df = filtered_df[filtered_df['Current Stage'].isin(stages)]
+    if types:
+        filtered_df = filtered_df[filtered_df['Type'].isin(types)]
+    if nationalities:
+        filtered_df = filtered_df[filtered_df['Nationality'].isin(nationalities)]
+    if client_notes:
+        filtered_df = filtered_df[filtered_df['Client Note'].isin(client_notes)]
+    
+    # Apply thresholds
+    threshold_dict = {
+        str(id_dict['stage']): threshold 
+        for threshold, id_dict in zip(thresholds, threshold_ids)
+    }
+    
+    # Calculate Late status
+    filtered_df['Late'] = filtered_df.apply(
+        lambda row: (pd.notna(row['Current Stage']) and 
+                    pd.notna(row['Time In Stage']) and 
+                    row['Time In Stage'] > threshold_dict.get(str(row['Current Stage']), 24)),
+        axis=1
+    )
+    
+    # Filter only late cases
+    late_cases_df = filtered_df[filtered_df['Late'] == True]
+    
+    if late_cases_df.empty:
+        return dbc.Alert("No late cases found to distribute.", color="warning")
+    
+    # Replace NaN values with None (JSON-compatible)
+    late_cases_df = late_cases_df.where(pd.notna(late_cases_df), None)
+    
+    # Distribute the filtered data evenly among selected users
+    try:
+        num_users = len(selected_users)
+        chunk_size = len(late_cases_df) // num_users
+        remainder = len(late_cases_df) % num_users
+        
+        results = {}
+        start_idx = 0
+        for i, username in enumerate(selected_users):
+            if username not in user_manager.users:
+                results[username] = {"status": "error", "message": f"User {username} not found"}
+                continue
+            
+            # Calculate end index for this user
+            end_idx = start_idx + chunk_size + (1 if i < remainder else 0)
+            user_data = late_cases_df.iloc[start_idx:end_idx]
+            start_idx = end_idx
+            
+            # Update the user's Google Sheet
+            try:
+                sheet = user_manager.client.open_by_key(user_manager.users[username].google_sheet_id).sheet1
+                sheet.clear()
+                # Replace NaN values with empty strings for Google Sheets compatibility
+                user_data = user_data.where(pd.notna(user_data), "")
+                sheet.update([user_data.columns.values.tolist()] + user_data.values.tolist())
+                results[username] = {"status": "success", "message": f"Assigned {len(user_data)} late cases to {username}"}
+            except Exception as e:
+                results[username] = {"status": "error", "message": f"Failed to update sheet for {username}: {str(e)}"}
+        
+        # Display results
+        messages = []
+        for username, result in results.items():
+            if result['status'] == 'success':
+                messages.append(dbc.Alert(result['message'], color="success"))
+            else:
+                messages.append(dbc.Alert(result['message'], color="danger"))
+        return html.Div(messages)
+    except Exception as e:
+        traceback.print_exc()
+        return dbc.Alert(f"An error occurred during task distribution: {str(e)}", color="danger")
+    
+# Callback for metrics and visualizations
+@app.callback(
+    [Output('metric-super-angry', 'children'),
+     Output('metric-prioritize-visa', 'children'),
+     Output('metric-total-late', 'children'),
+     Output('bar-chart', 'figure'),
+     Output('pie-chart', 'figure'),
+     Output('data-table', 'children')],
+    [Input('apply-filters', 'n_clicks'),
+     Input('reset-filters', 'n_clicks')],
+    [State('upload-data', 'contents'),
+     State('upload-data', 'filename'),
+     State('filter-stage', 'value'),
+     State('filter-type', 'value'),
+     State('filter-nationality', 'value'),
+     State('filter-client-note', 'value'),
+     State({'type': 'threshold-input', 'stage': dash.ALL}, 'value'),
+     State({'type': 'threshold-input', 'stage': dash.ALL}, 'id')]
+)
+def update_dashboard(apply_clicks, reset_clicks, contents, filename, stages, types, 
+                    nationalities, client_notes, thresholds, threshold_ids):
+    """Update all dashboard components based on filters and thresholds."""
+    if contents is None:
+        return "0", "0", "0", {}, {}, []
+    
+    # Parse the uploaded file
+    df = parse_contents(contents, filename)
+    if df.empty:
+        return "0", "0", "0", {}, {}, []
+        
+    filtered_df = df.copy()
+    
+    # Reset filters if reset button is clicked
+    if reset_clicks and reset_clicks > (apply_clicks or 0):
+        stages, types, nationalities, client_notes = None, None, None, None
+    
+    # Apply filters
+    if stages:
+        filtered_df = filtered_df[filtered_df['Current Stage'].isin(stages)]
+    if types:
+        filtered_df = filtered_df[filtered_df['Type'].isin(types)]
+    if nationalities:
+        filtered_df = filtered_df[filtered_df['Nationality'].isin(nationalities)]
+    if client_notes:
+        filtered_df = filtered_df[filtered_df['Client Note'].isin(client_notes)]
+    
+    # Create threshold dictionary
+    threshold_dict = {
+        str(id_dict['stage']): threshold 
+        for threshold, id_dict in zip(thresholds, threshold_ids)
+    }
+    
+    # Apply thresholds and calculate Late status
+    filtered_df['Late'] = filtered_df.apply(
+        lambda row: (pd.notna(row['Current Stage']) and 
+                    pd.notna(row['Time In Stage']) and 
+                    row['Time In Stage'] > threshold_dict.get(str(row['Current Stage']), 24)),
+        axis=1
+    )
+    
+    # Calculate metrics
+    super_angry = filtered_df[filtered_df['Client Note'] == 'SUPER_ANGRY_CLIENT']['Housemaid Name'].drop_duplicates().shape[0]
+    prioritize_visa = filtered_df[filtered_df['Client Note'] == 'PRIORITIZE_VISA']['Housemaid Name'].drop_duplicates().shape[0]
+    total_late = filtered_df[filtered_df['Late'] == True]['Housemaid Name'].drop_duplicates().shape[0]
+    
+    # Create bar chart for late cases (Top 10)
+    late_cases = filtered_df[filtered_df['Late'] == True]
+    stage_counts = late_cases.groupby('Current Stage')['Housemaid Name'].nunique().reset_index(name='Count')
+    stage_counts = stage_counts.sort_values(by='Count', ascending=False).head(10)  # Top 10
+
+    
+    bar_fig = go.Figure(data=[
+        go.Bar(
+            x=stage_counts['Count'],
+            y=stage_counts['Current Stage'],
+            orientation='h',
+            text=stage_counts['Count'],
+            textposition='auto',
+            marker_color='rgb(55, 83, 109)',
+            hovertemplate="Stage: %{y}<br>Late Cases: %{x}<extra></extra>"
+        )
+    ])
+    
+    bar_fig.update_layout(
+        margin=dict(l=20, r=20, t=40, b=20),
+        showlegend=False,
+        plot_bgcolor='white',
+        height=400,
+        xaxis_title="Number of Late Cases",
+        yaxis_title="Stage",
+        xaxis=dict(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(211, 211, 211, 0.5)'
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(211, 211, 211, 0.5)'
+        )
+    )
+    
+    # Create pie chart for stage distribution (Top 10)
+    stage_dist = filtered_df.groupby('Current Stage')['Housemaid Name'].nunique().reset_index(name='Count')
+    stage_dist = stage_dist.sort_values(by='Count', ascending=False).head(10)  # Top 10
+    
+    pie_fig = go.Figure(data=[
+        go.Pie(
+            labels=stage_dist['Current Stage'],
+            values=stage_dist['Count'],
+            textinfo='percent+label',
+            hole=0.3,
+            hovertemplate="Stage: %{label}<br>Cases: %{value}<br>Percentage: %{percent}<extra></extra>"
+        )
+    ])
+    
+    pie_fig.update_layout(
+        margin=dict(l=20, r=20, t=40, b=20),
+        showlegend=False,
+        height=400
+    )
+    
+    # Filter the data to include only delayed cases for the table
+    delayed_df = filtered_df[filtered_df['Late'] == True]
+    
+    # Create data table with enhanced formatting
+    table = dash_table.DataTable(
+        id='datatable',
+        columns=[{"name": i, "id": i} for i in delayed_df.columns],
+        data=delayed_df.to_dict('records'),
+        page_size=10,
+        style_table={
+            'overflowX': 'auto'
+        },
+        style_cell={
+            'textAlign': 'left',
+            'padding': '10px',
+            'fontSize': '14px',
+            'fontFamily': '"Segoe UI", Arial, sans-serif'
+        },
+        style_header={
+            'backgroundColor': '#f8f9fa',
+            'fontWeight': 'bold',
+            'border': '1px solid #dee2e6',
+            'textAlign': 'center'
+        },
+        style_data_conditional=[
+            {
+                'if': {'row_index': 'odd'},
+                'backgroundColor': '#f8f9fa'
+            },
+            {
+                'if': {'filter_query': '{Late} eq true'},
+                'backgroundColor': '#fff3cd',
+                'color': '#856404'
+            },
+            {
+                'if': {'filter_query': '{Client Note} eq "SUPER_ANGRY_CLIENT"'},
+                'backgroundColor': '#f8d7da',
+                'color': '#721c24'
+            },
+            {
+                'if': {'filter_query': '{Client Note} eq "PRIORITIZE_VISA"'},
+                'backgroundColor': '#fff3cd',
+                'color': '#856404'
+            }
+        ],
+        filter_action='native',
+        sort_action='native',
+        sort_mode='multi',
+        page_current=0,
+        filter_options={'case': 'insensitive'},
+        tooltip_data=[
+            {
+                column: {'value': str(value), 'type': 'markdown'}
+                for column, value in row.items()
+            } for row in delayed_df.to_dict('records')
+        ],
+        tooltip_header={
+            column: {'value': column, 'type': 'markdown'}
+            for column in delayed_df.columns
+        }
+    )
+    
+    return str(super_angry), str(prioritize_visa), str(total_late), bar_fig, pie_fig, table
+
+@app.callback(
+    Output('select-users', 'options'),
+    Input('user-table', 'data')
+)
+def update_user_dropdown(user_data):
+    """Update the dropdown options in the User Management & Task Distribution section."""
+    return [{'label': user['name'], 'value': user['username']} for user in user_data]
+
+# Callback for export functionality
+@app.callback(
+    [Output('download-csv', 'href'),
+     Output('download-excel', 'href')],
+    [Input('export-csv', 'n_clicks'),
+     Input('export-excel', 'n_clicks')],
+    [State('upload-data', 'contents'),
+     State('upload-data', 'filename'),
+     State('filter-stage', 'value'),
+     State('filter-type', 'value'),
+     State('filter-nationality', 'value'),
+     State('filter-client-note', 'value'),
+     State({'type': 'threshold-input', 'stage': dash.ALL}, 'value'),
+     State({'type': 'threshold-input', 'stage': dash.ALL}, 'id')]
+)
+def export_data(csv_clicks, excel_clicks, contents, filename, stages, types, 
+                nationalities, client_notes, thresholds, threshold_ids):
+    """Generate export links for filtered data in CSV and Excel formats."""
+    if contents is None:
+        return "", ""
+        
+    # Parse the uploaded file and apply filters
+    df = parse_contents(contents, filename)
+    if df.empty:
+        return "", ""
+        
+    filtered_df = df.copy()
+    
+    # Apply filters
+    if stages:
+        filtered_df = filtered_df[filtered_df['Current Stage'].isin(stages)]
+    if types:
+        filtered_df = filtered_df[filtered_df['Type'].isin(types)]
+    if nationalities:
+        filtered_df = filtered_df[filtered_df['Nationality'].isin(nationalities)]
+    if client_notes:
+        filtered_df = filtered_df[filtered_df['Client Note'].isin(client_notes)]
+    
+    # Apply thresholds
+    threshold_dict = {
+        str(id_dict['stage']): threshold 
+        for threshold, id_dict in zip(thresholds, threshold_ids)
+    }
+    
+    filtered_df['Late'] = filtered_df.apply(
+        lambda row: (pd.notna(row['Current Stage']) and 
+                    pd.notna(row['Time In Stage']) and 
+                    row['Time In Stage'] > threshold_dict.get(str(row['Current Stage']), 24)),
+        axis=1
+    )
+    
+    # Generate filename based on filters
+    filter_names = []
+    if stages:
+        filter_names.append(f"Stage_{'_'.join(stages)}")
+    if types:
+        filter_names.append(f"Type_{'_'.join(types)}")
+    if nationalities:
+        filter_names.append(f"Nationality_{'_'.join(nationalities)}")
+    if client_notes:
+        filter_names.append(f"ClientNote_{'_'.join(client_notes)}")
+    
+    base_filename = "filtered_data"
+    if filter_names:
+        base_filename += "_" + "_".join(filter_names)
+    
+    try:
+        # Create CSV download link
+        csv_string = filtered_df.to_csv(index=False, encoding='utf-8')
+        csv_base64 = base64.b64encode(csv_string.encode()).decode()
+        csv_href = f'data:text/csv;base64,{csv_base64}'
+        
+        # Create Excel download link
+        excel_buffer = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+            filtered_df.to_excel(writer, index=False)
+        excel_base64 = base64.b64encode(excel_buffer.getvalue()).decode()
+        excel_href = f'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{excel_base64}'
+        
+        # Update download filenames
+        app.clientside_callback(
+            """
+            function(csv_href, excel_href, base_filename) {
+                document.getElementById('download-csv').download = base_filename + '.csv';
+                document.getElementById('download-excel').download = base_filename + '.xlsx';
+                return [csv_href, excel_href];
+            }
+            """,
+            [Output('download-csv', 'href'),
+             Output('download-excel', 'href')],
+            [Input('download-csv', 'href'),
+             Input('download-excel', 'href')],
+            [State('base-filename', 'data')]
+        )
+        
+        return csv_href, excel_href, base_filename
+    except Exception as e:
+        print(f"Export error: {str(e)}")
+        return "", "", ""
+
+
+def run_server(debug=True, port=8050, host='0.0.0.0'):
+    print("""
+    ╔════════════════════════════════════════════╗
+    ║     Housemaid Monitoring Dashboard         ║
+    ╠════════════════════════════════════════════╣
+    ║ Starting server at http://localhost:8050   ║
+    ║ Press Ctrl+C to quit                       ║
+    ╚════════════════════════════════════════════╝
+    """)
+    app.run_server(debug=debug, port=port, host=host)
+# Run the app
+if __name__ == '__main__':
+    run_server(debug=True, port=8050, host="0.0.0.0")
 else:
-    analytics_app = DelayedMaidsAnalytics()
-    analytics_app.create_layout()
-    analytics_app.setup_callbacks()
-    server = analytics_app.app.server
+    server = app.server  # Ensure the server is exposed when deployed
