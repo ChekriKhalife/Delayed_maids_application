@@ -223,11 +223,15 @@ class UserManager:
     def setup_google_sheets(self):
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         credentials_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_PATH")
-        if not credentials_path or not os.path.exists(credentials_path):
-            raise ValueError("Environment variable GOOGLE_SERVICE_ACCOUNT_JSON_PATH is missing or file does not exist")
+        
+        if not credentials_path:
+            raise ValueError("Environment variable GOOGLE_SERVICE_ACCOUNT_JSON_PATH is missing")
+        
+        if not os.path.exists(credentials_path):
+            raise ValueError(f"Credentials file not found at {credentials_path}")
+        
         creds = ServiceAccountCredentials.from_json_keyfile_name(credentials_path, scope)
         self.client = gspread.authorize(creds)
-
     def distribute_data(self, usernames: list, data: pd.DataFrame) -> dict:
         """Distribute data evenly among users."""
         results = {}
@@ -1319,11 +1323,10 @@ def export_data(csv_clicks, excel_clicks, contents, filename, stages, types,
             [State('base-filename', 'data')]
         )
         
-        return csv_href, excel_href, base_filename
+        return csv_href, excel_href
     except Exception as e:
         print(f"Export error: {str(e)}")
-        return "", "", ""
-
+        return "", ""
 
 def run_server(debug=True, port=8050, host='0.0.0.0'):
     print("""
