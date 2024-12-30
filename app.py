@@ -13,6 +13,35 @@ from dataclasses import dataclass
 import json
 import traceback
 
+# Define custom styles for components
+custom_styles = {
+    'filter-card': {
+        'border-radius': '12px',
+        'box-shadow': '0 2px 4px rgba(0,0,0,0.1)',
+        'transition': 'transform 0.2s, box-shadow 0.2s',
+        'background': 'white',
+        'margin-bottom': '1.5rem'
+    },
+    'metric-card': {
+        'padding': '1.5rem',
+        'text-align': 'center',
+        'border-radius': '12px',
+        'background': 'white'
+    },
+    'chart-card': {
+        'border-radius': '12px',
+        'box-shadow': '0 2px 4px rgba(0,0,0,0.1)',
+        'background': 'white',
+        'margin-bottom': '1.5rem'
+    },
+    'threshold-card': {
+        'border-radius': '8px',
+        'box-shadow': '0 2px 4px rgba(0,0,0,0.1)',
+        'background': 'white',
+        'margin-bottom': '1rem'
+    }
+}
+
 # Initialize the Dash app with a modern Bootstrap theme
 app = dash.Dash(__name__, 
     external_stylesheets=[
