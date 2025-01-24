@@ -1263,7 +1263,8 @@ def update_user_dropdown(user_data):
 # Callback for export functionality
 @app.callback(
     [Output('download-csv', 'href'),
-     Output('download-excel', 'href')],
+     Output('download-excel', 'href'),
+     Output('base-filename', 'children')],  # Add this output
     [Input('export-csv', 'n_clicks'),
      Input('export-excel', 'n_clicks')],
     [State('upload-data', 'contents'),
@@ -1275,19 +1276,19 @@ def update_user_dropdown(user_data):
      State({'type': 'threshold-input', 'stage': dash.ALL}, 'value'),
      State({'type': 'threshold-input', 'stage': dash.ALL}, 'id')]
 )
-def export_data(csv_clicks, excel_clicks, contents, filename, stages, types, 
+def export_data(csv_clicks, excel_clicks, contents, filename, stages, types,
                 nationalities, client_notes, thresholds, threshold_ids):
     """Generate export links for filtered data in CSV and Excel formats."""
     if contents is None:
-        return "", ""
-        
+        return "", "", ""  # Return an empty string for base_filename as well
+
     # Parse the uploaded file and apply filters
     df = parse_contents(contents, filename)
     if df.empty:
-        return "", ""
-        
+        return "", "", ""  # Return an empty string for base_filename as well
+
     filtered_df = df.copy()
-    
+
     # Apply filters
     if stages:
         filtered_df = filtered_df[filtered_df['Current Stage'].isin(stages)]
@@ -1297,20 +1298,20 @@ def export_data(csv_clicks, excel_clicks, contents, filename, stages, types,
         filtered_df = filtered_df[filtered_df['Nationality'].isin(nationalities)]
     if client_notes:
         filtered_df = filtered_df[filtered_df['Client Note'].isin(client_notes)]
-    
+
     # Apply thresholds
     threshold_dict = {
-        str(id_dict['stage']): threshold 
+        str(id_dict['stage']): threshold
         for threshold, id_dict in zip(thresholds, threshold_ids)
     }
-    
+
     filtered_df['Late'] = filtered_df.apply(
-        lambda row: (pd.notna(row['Current Stage']) and 
-                    pd.notna(row['Time In Stage']) and 
-                    row['Time In Stage'] > threshold_dict.get(str(row['Current Stage']), 24)),
+        lambda row: (pd.notna(row['Current Stage']) and
+                     pd.notna(row['Time In Stage']) and
+                     row['Time In Stage'] > threshold_dict.get(str(row['Current Stage']), 24)),
         axis=1
     )
-    
+
     # Generate filename based on filters
     filter_names = []
     if stages:
@@ -1321,44 +1322,28 @@ def export_data(csv_clicks, excel_clicks, contents, filename, stages, types,
         filter_names.append(f"Nationality_{'_'.join(nationalities)}")
     if client_notes:
         filter_names.append(f"ClientNote_{'_'.join(client_notes)}")
-    
+
     base_filename = "filtered_data"
     if filter_names:
         base_filename += "_" + "_".join(filter_names)
-    
+
     try:
         # Create CSV download link
         csv_string = filtered_df.to_csv(index=False, encoding='utf-8')
         csv_base64 = base64.b64encode(csv_string.encode()).decode()
         csv_href = f'data:text/csv;base64,{csv_base64}'
-        
+
         # Create Excel download link
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
             filtered_df.to_excel(writer, index=False)
         excel_base64 = base64.b64encode(excel_buffer.getvalue()).decode()
         excel_href = f'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{excel_base64}'
-        
-        # Update download filenames
-        app.clientside_callback(
-            """
-            function(csv_href, excel_href, base_filename) {
-                document.getElementById('download-csv').download = base_filename + '.csv';
-                document.getElementById('download-excel').download = base_filename + '.xlsx';
-                return [csv_href, excel_href];
-            }
-            """,
-            [Output('download-csv', 'href'),
-             Output('download-excel', 'href')],
-            [Input('download-csv', 'href'),
-             Input('download-excel', 'href')],
-            [State('base-filename', 'data')]
-        )
-        
-        return csv_href, excel_href, base_filename
+
+        return csv_href, excel_href, base_filename  # Return base_filename as well
     except Exception as e:
         print(f"Export error: {str(e)}")
-        return "", "", ""
+        return "", "", ""  # Return an empty string for base_filename as well
 
 
 def run_server(debug=True, port=8050, host='0.0.0.0'):
